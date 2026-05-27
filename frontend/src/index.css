@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-netflix-black text-white m-0 antialiased;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+}
+
+/* Custom horizontal scrollbar hide — Netflix-style invisible scroll */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+/* Backwards compat alias */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Hero section overlay */
+.hero-overlay {
+  background: linear-gradient(77deg,rgba(0,0,0,.6) 0,rgba(0,0,0,0) 85%);
+}

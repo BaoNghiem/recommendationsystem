@@ -1,0 +1,32 @@
+# Environments
+venv/
+env/
+.env
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+dist/
+build/
+
+# Database / logs
+*.sqlite3
+*.db
+logs/
+.pytest_cache/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Data files (tuỳ chọn - nếu file data quá lớn thì nên bỏ qua, nhưng nếu dùng để test thì có thể giữ)
+# data/movies.dat
+# data/ratings.dat
+# data/users.dat
+
+# Model files
+model/
+*.pkl

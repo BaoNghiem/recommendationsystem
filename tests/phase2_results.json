@@ -1,0 +1,81 @@
+{
+  "results": [
+    {
+      "test": "Register cold user",
+      "status": "PASS",
+      "detail": "HTTP 201",
+      "phase": 2
+    },
+    {
+      "test": "Login cold user",
+      "status": "PASS",
+      "detail": "user_id=7020",
+      "phase": 2
+    },
+    {
+      "test": "Rating > 5.0 rejected",
+      "status": "PASS",
+      "detail": "HTTP 422",
+      "phase": 2
+    },
+    {
+      "test": "Rating < 0.5 rejected",
+      "status": "PASS",
+      "detail": "HTTP 422",
+      "phase": 2
+    },
+    {
+      "test": "Rating 5.0 accepted",
+      "status": "PASS",
+      "detail": "HTTP 200",
+      "phase": 2
+    },
+    {
+      "test": "/rate without JWT => 401",
+      "status": "PASS",
+      "detail": "HTTP 401",
+      "phase": 2
+    },
+    {
+      "test": "Rated 7/7 anime movies",
+      "status": "PASS",
+      "detail": "movie_ids=[4036, 3000, 4038, 4039, 4043, 4045, 4046]",
+      "phase": 2
+    },
+    {
+      "test": "Recommendations returned",
+      "status": "PASS",
+      "detail": "20 movies",
+      "phase": 2
+    },
+    {
+      "test": "Strategy is fold-in or content-based",
+      "status": "PASS",
+      "detail": "strategy='content_based'",
+      "phase": 2
+    },
+    {
+      "test": "Top-10 recs have Animation affinity",
+      "status": "FAIL",
+      "detail": "0/10 = 0% Animation",
+      "phase": 2
+    },
+    {
+      "test": "Avg predicted rating > 3.0",
+      "status": "PASS",
+      "detail": "avg=3.27",
+      "phase": 2
+    }
+  ],
+  "cold_uid": 7020,
+  "cold_email": "anime_fan_1779183233@test.com",
+  "anime_ids_rated": [
+    4036,
+    3000,
+    4038,
+    4039,
+    4043,
+    4045,
+    4046
+  ]
+}
