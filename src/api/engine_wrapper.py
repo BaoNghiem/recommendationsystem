@@ -74,7 +74,15 @@ class RecommendationEngine:
                 cur = conn.cursor()
 
                 # Nap phim moi tu DB
-                cur.execute("SELECT movie_id, title, genres_orig FROM movies WHERE movie_id > 3883")
+                # NOTE (Phase 2): Sau migration, bang movies van giu genres_orig (text).
+                # AI pipeline (FeatureEngineer.process_movies) doc cot 'genres' la text
+                # va tu parse thanh binary multi-hot — KHONG phu thuoc vao bang movie_genres.
+                # Bang movie_genres chi phuc vu Filter API (by-genre endpoint).
+                cur.execute("""
+                    SELECT movie_id, title, genres_orig
+                    FROM movies
+                    WHERE movie_id > 3883
+                """)
                 new_movie_rows = cur.fetchall()
                 if new_movie_rows:
                     new_movies_df = pd.DataFrame(new_movie_rows, columns=["movie_id", "title", "genres"])
@@ -112,7 +120,8 @@ class RecommendationEngine:
             # 2c. UU TIEN load mappings da luu tu lan retrain truoc (dam bao khop model)
             mappings_path = MODEL_OUTPUT_DIR / 'id_mappings.pkl'
             if mappings_path.exists():
-                saved_maps = pickle.load(open(mappings_path, 'rb'))
+                with open(mappings_path, 'rb') as f:
+                    saved_maps = pickle.load(f)
                 preprocessor = DataPreprocessor()
                 preprocessor.user2idx = saved_maps["user2idx"]
                 preprocessor.idx2user = saved_maps["idx2user"]
@@ -139,7 +148,10 @@ class RecommendationEngine:
             # Luu mapping dictionaries
             self.user2idx = preprocessor.user2idx     # user_id -> user_idx
             self.idx2movie = preprocessor.idx2movie   # movie_idx -> movie_id
-            self.movie2idx = {v: k for k, v in self.idx2movie.items()}  # movie_id -> movie_idx
+            # BUG FIX: Dung truc tiep preprocessor.movie2idx (movie_id -> movie_idx)
+            # KHONG rebuild bang cach dao nguoc idx2movie, vi reload_content_based() se
+            # cap nhat idx2movie sau nay khien hai dict bi desync nhau.
+            self.movie2idx = preprocessor.movie2idx   # movie_id -> movie_idx
 
             # Kiem tra tuong thich voi model da train
             n_model_users = self.svd_model.user_factors.shape[0]
@@ -248,6 +260,86 @@ class RecommendationEngine:
             self._db_rating_count = db_count
         except Exception as e:
             print(f"[ENGINE] Retrain check failed: {e}")
+
+    # ════════════════════════════════════════════════════════════
+    # HOT RELOAD: Cap nhat Content-Based khi co phim moi tu Admin
+    # ════════════════════════════════════════════════════════════
+    def reload_content_based(self):
+        """
+        Hot-reload Content-Based similarity matrix.
+        Goi sau khi Admin them/sua phim de model phan hoi ngay ma khong phai restart server.
+        Chay trong background thread (khong block API).
+
+        FIX Cold-Start: Phan cong movie_idx tam thoi cho phim moi (chua co trong mapping
+        cua model da train), dam bao chung duoc dua vao CB similarity matrix ngay lap tuc.
+        """
+        print("[ENGINE] Bat dau hot-reload Content-Based model...")
+        try:
+            from src.database.db_config import DatabaseConnector
+            from src.data.data_loader import DataLoader
+            from src.features.feature_engineering import FeatureEngineer
+            from config.settings import MOVIES_PATH, RATINGS_PATH, USERS_PATH
+
+            # 1. Lay tat ca phim moi tu DB (movie_id > 3883)
+            conn = DatabaseConnector.get_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT movie_id, title, genres_orig
+                FROM movies
+                WHERE movie_id > 3883
+            """)
+            new_movie_rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            # 2. Merge voi dat file goc
+            loader = DataLoader(MOVIES_PATH, RATINGS_PATH, USERS_PATH)
+            movies = loader.load_movies()
+            if new_movie_rows:
+                new_df = pd.DataFrame(new_movie_rows,
+                                      columns=["movie_id", "title", "genres"])
+                movies = pd.concat([movies, new_df], ignore_index=True)
+                movies = movies.drop_duplicates(subset=["movie_id"], keep="last")
+
+            # 3. Re-fit Content-Based
+            movies_proc = FeatureEngineer.process_movies(movies)
+            movies_proc["movie_idx"] = movies_proc["movie_id"].map(self.movie2idx)
+
+            # --- COLD-START FIX: Phan cong idx tam thoi cho phim chua co trong mapping ---
+            # Tim idx tiep theo sau max idx hien tai trong model
+            next_new_idx = (
+                int(movies_proc["movie_idx"].dropna().max()) + 1
+                if movies_proc["movie_idx"].notna().any()
+                else len(self.movie2idx)
+            )
+            # Cap nhat mapping tam thoi (chi dung cho CB, khong anh huong SVD)
+            self._new_movie_temp_map = {}  # movie_id -> temp_idx
+            for _, row in movies_proc[movies_proc["movie_idx"].isna()].iterrows():
+                mid = int(row["movie_id"])
+                movies_proc.loc[movies_proc["movie_id"] == mid, "movie_idx"] = next_new_idx
+                self._new_movie_temp_map[mid] = next_new_idx
+                # BUG #5 FIX: Sync ca hai dict de tranh desync
+                self.idx2movie[next_new_idx] = mid
+                self.movie2idx[mid] = next_new_idx  # <-- quan trong: cap nhat nguoc lai
+                next_new_idx += 1
+            # --------------------------------------------------------------------------
+
+            movies_proc = movies_proc.dropna(subset=["movie_idx"])
+            movies_proc["movie_idx"] = movies_proc["movie_idx"].astype(int)
+
+            new_cb = ContentBasedModel()
+            new_cb.fit(movies_proc)
+
+            # 4. Atomic replace (tranh race condition)
+            self.cb_model = new_cb
+            self.hybrid_engine = HybridRecommender(self.svd_model, self.cb_model)
+            self.hybrid_engine.fit_hybrid_metadata(self.train_df, self.users_processed)
+
+            n_new = len(getattr(self, '_new_movie_temp_map', {}))
+            print(f"[ENGINE] Hot-reload xong: {len(movies)} phim trong CB matrix "
+                  f"({n_new} phim moi duoc them voi idx tam thoi)")
+        except Exception as e:
+            print(f"[ENGINE] Hot-reload that bai (engine khong anh huong): {e}")
 
     # ══════════════════════════════════════════════════════════════
     # FOLD-IN: Tinh user vector moi tu item_factors (Online Learning)
@@ -455,6 +547,9 @@ class RecommendationEngine:
         - Dung ma tran Cosine Similarity de tim phim tuong dong nhat.
         - Tra ve danh sach movie_id sap xep theo do tuong dong giam dan.
 
+        COLD-START FIX: Neu seed la phim moi (chua co trong CB matrix),
+        doi sang tim phim co cung the loai tu DB.
+
         Args:
             seed_movie_ids: list of movie_id (phim user thich, >= 4 sao)
             top_n: so phim goi y
@@ -470,11 +565,22 @@ class RecommendationEngine:
         exclude_ids = set(exclude_ids or [])
 
         # Map movie_id -> movie_idx (noi bo model)
+        # Uu tien: movie2idx (tu model) -> _new_movie_temp_map (phim moi hot-reload)
+        temp_map = getattr(self, '_new_movie_temp_map', {})
         seed_indices = []
+        unmapped_seeds = []  # phim moi chua co trong bat ky map nao
         for mid in seed_movie_ids:
-            idx = self.movie2idx.get(mid)
+            idx = self.movie2idx.get(mid) or temp_map.get(mid)
             if idx is not None and idx in self.cb_model.movie_idx_to_pos:
                 seed_indices.append(idx)
+            else:
+                unmapped_seeds.append(mid)
+
+        # COLD-START: Neu co phim moi chua hot-reload, lay genre fallback tu DB
+        if unmapped_seeds and not seed_indices:
+            print(f"[ENGINE-CB] {len(unmapped_seeds)} seed(s) la phim moi chua trong CB, "
+                  f"dung genre-based fallback")
+            return self._genre_based_fallback(unmapped_seeds, top_n, exclude_ids)
 
         if not seed_indices:
             print(f"[ENGINE-CB] Khong map duoc seed movies, fallback popularity")
@@ -502,6 +608,75 @@ class RecommendationEngine:
 
         print(f"[ENGINE-CB] Content-Based: {len(seed_indices)} seeds -> {len(result)} recommendations")
         return result
+
+    # ══════════════════════════════════════════════════════════════
+    # COLD-START GENRE FALLBACK: Cho phim moi chua vao CB matrix
+    # ══════════════════════════════════════════════════════════════
+    def _genre_based_fallback(self, seed_movie_ids, top_n=20, exclude_ids=None):
+        """
+        Fallback cho cold-start: tim phim cung the loai voi seed movies.
+        Su dung khi seed movies la phim moi (>3883) chua duoc hot-reload vao CB matrix.
+        Uu tien phim co avg_rating cao va nhieu luot danh gia.
+        """
+        exclude_ids = set(exclude_ids or [])
+        try:
+            from src.database.db_config import DatabaseConnector
+            conn = DatabaseConnector.get_connection()
+            cur = conn.cursor()
+
+            # Lay genres cua cac seed movies
+            cur.execute(
+                "SELECT genres_orig FROM movies WHERE movie_id = ANY(%s)",
+                (list(seed_movie_ids),)
+            )
+            genre_rows = cur.fetchall()
+            if not genre_rows:
+                cur.close(); conn.close()
+                return self.get_popular_movies(top_n)
+
+            # Tong hop tat ca genres
+            genres_set = set()
+            for row in genre_rows:
+                if row[0]:
+                    for g in row[0].split('|'):
+                        genres_set.add(g.strip())
+
+            if not genres_set:
+                cur.close(); conn.close()
+                return self.get_popular_movies(top_n)
+
+            # Tim phim co it nhat 1 genre trung khop, sap xep theo avg_rating
+            genre_conditions = " OR ".join(
+                [f"m.genres_orig ILIKE %s" for _ in genres_set]
+            )
+            params = [f"%{g}%" for g in genres_set] + [top_n * 3]
+            cur.execute(f"""
+                SELECT m.movie_id,
+                       COALESCE(AVG(r.rating), 0) AS avg_r,
+                       COUNT(r.rating) AS cnt
+                FROM movies m
+                LEFT JOIN ratings r ON m.movie_id = r.movie_id
+                WHERE ({genre_conditions})
+                  AND m.movie_id <= 3883
+                GROUP BY m.movie_id
+                HAVING COUNT(r.rating) > 20
+                ORDER BY avg_r DESC, cnt DESC
+                LIMIT %s
+            """, params)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            result = [
+                int(row[0]) for row in rows
+                if row[0] not in exclude_ids
+            ][:top_n]
+
+            print(f"[ENGINE-CB] Genre fallback: genres={genres_set} -> {len(result)} phim")
+            return result if result else self.get_popular_movies(top_n)
+        except Exception as e:
+            print(f"[ENGINE-CB] Genre fallback loi: {e}")
+            return self.get_popular_movies(top_n)
 
     # ══════════════════════════════════════════════════════════════
     # MAIN ENTRY: get_recommendations — CORE LOGIC Phase 3

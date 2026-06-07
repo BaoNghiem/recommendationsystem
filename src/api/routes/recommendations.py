@@ -68,8 +68,10 @@ async def get_recommendations(
         # Get already-rated movies to exclude
         rated_ids = set(recommender_engine.get_rated_movies(uid))
 
-        # Call AI Engine — returns (movie_ids, strategy) or just list
-        result = recommender_engine.get_recommendations(uid, top_n=top_n + len(rated_ids) + 10)
+        # BUG #6 FIX: Dung max() de dam bao luon co du candidates
+        # Khi user da rate nhieu phim, len(rated_ids) co the rat lon
+        buffer = max(len(rated_ids) + 10, top_n * 3)
+        result = recommender_engine.get_recommendations(uid, top_n=top_n + buffer)
 
         if isinstance(result, tuple):
             raw_ids, strategy = result
@@ -100,15 +102,18 @@ async def get_recommendations(
         cur = conn.cursor()
         try:
             cur.execute(
-                "SELECT movie_id, title, genres_orig FROM movies WHERE movie_id = ANY(%s)",
+                "SELECT movie_id, title, genres_orig, poster_url FROM movies WHERE movie_id = ANY(%s)",
                 (filtered_ids,),
             )
             rows = cur.fetchall()
-            cur.close()
         finally:
+            cur.close()
             conn.close()
 
-        lookup = {r[0]: {"movie_id": r[0], "title": r[1], "genres_orig": r[2]} for r in rows}
+        lookup = {
+            r[0]: {"movie_id": r[0], "title": r[1], "genres_orig": r[2], "poster_url": r[3]}
+            for r in rows
+        }
 
         recs = []
         for mid in filtered_ids:

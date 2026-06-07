@@ -7,6 +7,7 @@ import LoginModal from './components/LoginModal';
 import MovieManagement from './pages/MovieManagement';
 import UserManagement from './pages/admin/UserManagement';
 import AdminDashboard from './pages/admin/AdminDashboard';
+import PeopleManagement from './pages/admin/PeopleManagement';
 import GenrePage from './pages/GenrePage';
 import SearchPage from './pages/SearchPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -245,6 +246,8 @@ function AppInner() {
         <MovieManagement />
       ) : currentPage === 'users' ? (
         <UserManagement />
+      ) : currentPage === 'people' ? (
+        <PeopleManagement />
       ) : currentPage === 'profile' ? (
         <Profile />
       ) : currentPage === 'search' ? (

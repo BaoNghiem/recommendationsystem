@@ -27,19 +27,22 @@ p3 = json.loads((Path(__file__).parent / "phase3_results.json").read_text(encodi
 
 admin_token = p1.get("admin_token")
 cold_uid = p2.get("cold_uid")
+cold_token = p2.get("cold_token")   # BUG B FIX: Load token tu phase2
 legacy_uids = p3.get("legacy_uids", [])
 inserted_ids = p1.get("inserted_movie_ids", [])
 inserted_set = set(inserted_ids)
 
 ADMIN_H = {"Authorization": f"Bearer {admin_token}"} if admin_token else {}
+COLD_H  = {"Authorization": f"Bearer {cold_token}"} if cold_token else {}
 
 # ══════════════════════════════════════════════════════════════
 # 4.1 Verify Cold User Strategy Post-Retrain
 # ══════════════════════════════════════════════════════════════
 section("4.1 Cold User Recommendations (Post-Retrain)")
 
-if cold_uid:
-    r = requests.get(f"{BASE}/recommend/{cold_uid}")
+if cold_uid and cold_token:
+    # BUG B FIX: Dung cold_token (luu tu phase2) de pass JWT + IDOR guard
+    r = requests.get(f"{BASE}/recommend/{cold_uid}", headers=COLD_H)
     if r.status_code == 200:
         data = r.json()
         strategy = data.get("strategy", "")
@@ -53,21 +56,35 @@ if cold_uid:
         print(f"\n  Strategy: {strategy}")
         print(f"  Explanation: {data.get('explanation', '')}")
     else:
-        TEST("Cold user recs", False, f"HTTP {r.status_code}")
+        TEST("Cold user recs", False, f"HTTP {r.status_code}: {r.text[:100]}")
 else:
-    TEST("Cold user test skipped", False, "No cold_uid")
+    TEST("Cold user test skipped", False, "No cold_uid or cold_token — re-run Phase 2 first")
 
 # ══════════════════════════════════════════════════════════════
 # 4.2 Legacy Users Recommendations - FunkSVD Pure
 # ══════════════════════════════════════════════════════════════
 section("4.2 Legacy Users - FunkSVD Strategy Validation")
 
+# BUG B FIX: Legacy users khong the login (bi block), nen tao JWT truc tiep
+# de test recommendation endpoint voi dung auth header.
+try:
+    from src.api.auth.utils import create_access_token
+    def make_user_token(uid: int) -> str:
+        return create_access_token({"sub": str(uid), "role": "user"})
+except Exception:
+    make_user_token = None
+
 strategy_counts = Counter()
 all_recs_data = {}
 
 for uid in legacy_uids[:5]:  # Test 5 of 10
     try:
-        r = requests.get(f"{BASE}/recommend/{uid}")
+        if make_user_token is None:
+            TEST(f"User {uid} recs", False, "Cannot create token")
+            continue
+        user_token = make_user_token(uid)
+        user_h = {"Authorization": f"Bearer {user_token}"}
+        r = requests.get(f"{BASE}/recommend/{uid}", headers=user_h)
         if r.status_code == 200:
             data = r.json()
             s = data.get("strategy", "unknown")

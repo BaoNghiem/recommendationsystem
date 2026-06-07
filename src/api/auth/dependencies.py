@@ -41,6 +41,11 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Token missing user info.")
 
     conn = DatabaseConnector.get_connection()
+    if not conn:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cannot connect to database."
+        )
     cur  = conn.cursor()
     try:
         cur.execute(

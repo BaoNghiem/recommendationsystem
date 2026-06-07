@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Star, Film, AlertCircle, Loader2, ArrowLeft, Play } from 'lucide-react';
+import { Search, Star, Film, AlertCircle, Loader2, ArrowLeft, Video } from 'lucide-react';
 import axios from '../api/axios';
+import { fixTitle, getPosterUrl } from '../utils/formatTitle';
+import MovieDetailModal from '../components/MovieDetailModal';
 
 const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
   const [results, setResults] = useState([]);
@@ -9,6 +11,7 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
   const [searched, setSearched] = useState(false);
   const [hoverRating, setHoverRating] = useState({});
   const [localRatings, setLocalRatings] = useState({});
+  const [selectedMovie, setSelectedMovie] = useState(null);
   const abortRef = useRef(null);
 
   // ── Fetch search results when query changes ──
@@ -62,10 +65,6 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
     return 0;
   };
 
-  const getPosterUrl = (movie) => {
-    const encodedTitle = encodeURIComponent(movie.title);
-    return `https://placehold.co/300x450/141414/ffffff?text=${encodedTitle}`;
-  };
 
   // ── Card animation variants ──
   const cardVariants = {
@@ -164,6 +163,7 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
                 variants={cardVariants}
                 whileHover={{ scale: 1.04, y: -6 }}
                 className="relative group cursor-pointer"
+                onClick={() => setSelectedMovie(movie)}
               >
                 {/* Card container */}
                 <div className="relative aspect-[2/3] rounded-xl overflow-hidden
@@ -188,17 +188,21 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
                     </div>
                   )}
 
-                  {/* Bottom gradient overlay (always visible) */}
+                  {/* Bottom gradient overlay */}
                   <div className="absolute bottom-0 left-0 right-0 p-3
                                   bg-gradient-to-t from-black via-black/80 to-transparent">
                     <p className="text-white text-xs lg:text-sm font-bold truncate mb-1">
-                      {movie.title}
+                      {fixTitle(movie.title)}
                     </p>
                     <p className="text-gray-400 text-[10px] truncate">
                       {movie.genres_orig?.split('|').join(' · ')}
                     </p>
-
-                    {/* Vote count */}
+                    {/* Director row */}
+                    {movie.directors?.length > 0 && (
+                      <p className="text-blue-400 text-[9px] truncate mt-0.5 flex items-center gap-1">
+                        <Video size={8} />{movie.directors.map(d => d.name).join(', ')}
+                      </p>
+                    )}
                     {movie.vote_count > 0 && (
                       <p className="text-gray-500 text-[9px] mt-0.5">
                         {movie.vote_count.toLocaleString()} luot danh gia
@@ -211,10 +215,6 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
                                   opacity-0 group-hover:opacity-100 transition-opacity
                                   duration-200 z-10">
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="w-9 h-9 rounded-full bg-white flex items-center
-                                      justify-center shadow-lg">
-                        <Play size={16} fill="black" className="text-black ml-0.5" />
-                      </div>
                       {movie.avg_rating > 0 && (
                         <span className="text-green-400 text-xs font-bold">
                           ★ {movie.avg_rating}
@@ -256,8 +256,14 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
                         })}
                       </div>
                       <h3 className="text-white font-bold text-xs lg:text-sm line-clamp-2">
-                        {movie.title}
+                        {fixTitle(movie.title)}
                       </h3>
+                      {/* Directors in hover */}
+                      {movie.directors?.length > 0 && (
+                        <p className="text-blue-400 text-[9px] mt-1 flex items-center gap-1 truncate">
+                          <Video size={8} />{movie.directors.map(d => d.name).join(', ')}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -265,6 +271,14 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
             );
           })}
         </motion.div>
+      )}
+
+      {/* Movie Detail Modal */}
+      {selectedMovie && (
+        <MovieDetailModal 
+          movie={selectedMovie} 
+          onClose={() => setSelectedMovie(null)} 
+        />
       )}
     </div>
   );

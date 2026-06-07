@@ -1,32 +1,53 @@
-# Environments
+# ══════════════════════════════════════════════
+# Python
+# ══════════════════════════════════════════════
 venv/
 env/
-.env
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 
-# Node
+# ══════════════════════════════════════════════
+# Environment (SENSITIVE — không bao giờ commit)
+# ══════════════════════════════════════════════
+.env
+
+# ══════════════════════════════════════════════
+# Node / Frontend build
+# ══════════════════════════════════════════════
 node_modules/
-dist/
-build/
+frontend/dist/
+frontend/build/
 
-# Database / logs
-*.sqlite3
-*.db
-logs/
-.pytest_cache/
-
-# IDEs
+# ══════════════════════════════════════════════
+# IDE
+# ══════════════════════════════════════════════
 .idea/
 .vscode/
 *.swp
 .DS_Store
 
-# Data files (tuỳ chọn - nếu file data quá lớn thì nên bỏ qua, nhưng nếu dùng để test thì có thể giữ)
-# data/movies.dat
-# data/ratings.dat
-# data/users.dat
+# ══════════════════════════════════════════════
+# Testing artifacts
+# ══════════════════════════════════════════════
+.pytest_cache/
+tests/phase*_results.json
 
-# Model files
-model/
-*.pkl
+# ══════════════════════════════════════════════
+# Database
+# ══════════════════════════════════════════════
+*.sqlite3
+*.db
+logs/
+# DB dump có thể rất lớn — KHÔNG push lên GitHub.
+# Dùng script: python scripts/dump_db.py để tạo local.
+scripts/movie_db_dump.sql
+
+# ══════════════════════════════════════════════
+# Model & Data — ĐƯỢC TRACK (nhỏ, cần cho chương trình)
+# ══════════════════════════════════════════════
+# output/models/*.pkl  -> GIỮ (3.7MB + 0.4MB — OK)
+# data/ml-1m/          -> GIỮ (ratings.dat 23.5MB — OK với git)
+# uploads/posters/     -> GIỮ (poster ảnh đã upload)

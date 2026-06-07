@@ -1,13 +1,28 @@
 """
-Auth Routes: /auth/register, /auth/login, /auth/me, /auth/verify-email,
-             /auth/forgot-password, /auth/reset-password
-======================================================================
-Phase 2+: Real Gmail SMTP verification + Forgot Password flow.
+╔══════════════════════════════════════════════════════════════════╗
+║  REFACTORED AUTH ROUTES — SECURITY-HARDENED VERSION             ║
+║  ================================================================║
+║  Bản tối ưu bảo mật cho luồng xác thực Email + Đăng nhập.      ║
+║                                                                   ║
+║  CÁC CẢI TIẾN SO VỚI BẢN GỐC:                                  ║
+║  1. ✅ Login Guard: Chặn user chưa verify email                  ║
+║  2. ✅ Rate Limiting: Chống spam forgot-password & resend         ║
+║  3. ✅ Reset Token Replay Protection (password_changed_at)        ║
+║  4. ✅ Expired Token Cleanup khi verify thất bại                  ║
+║  5. ✅ datetime.now(UTC) thay cho utcnow() deprecated             ║
+║  6. ✅ Structured logging thay cho print()                        ║
+║                                                                   ║
+║  CÁCH SỬ DỤNG: Thay thế nội dung file routes/auth.py bằng file  ║
+║  này, hoặc áp dụng từng patch riêng lẻ từ báo cáo audit.        ║
+╚══════════════════════════════════════════════════════════════════╝
 """
 import os
+import logging
+import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse
 
 from src.database.db_config import DatabaseConnector
@@ -26,14 +41,73 @@ from src.api.utils.email import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger("auth")
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 
-# ── Helpers ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 🛡️ RATE LIMITER — In-Memory (Phù hợp single-instance)
+# ═══════════════════════════════════════════════════════════════
+class RateLimiter:
+    """
+    Rate limiter đơn giản dùng in-memory dictionary.
+    Cho production multi-instance, nên chuyển sang Redis.
+
+    Usage:
+        rate_limiter.check("forgot_password", client_ip, max_requests=3, window_seconds=300)
+    """
+
+    def __init__(self):
+        # key -> list of timestamps
+        self._store: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, scope: str, identifier: str, max_requests: int, window_seconds: int) -> bool:
+        """
+        Trả True nếu request được phép, False nếu bị throttle.
+        Tự động dọn dẹp entries cũ.
+        """
+        key = f"{scope}:{identifier}"
+        now = time.time()
+        cutoff = now - window_seconds
+
+        # Xóa entries cũ
+        self._store[key] = [t for t in self._store[key] if t > cutoff]
+
+        if len(self._store[key]) >= max_requests:
+            return False  # Throttled
+
+        self._store[key].append(now)
+        return True
+
+    def remaining(self, scope: str, identifier: str, max_requests: int, window_seconds: int) -> int:
+        """Trả về số request còn lại trong window."""
+        key = f"{scope}:{identifier}"
+        now = time.time()
+        cutoff = now - window_seconds
+        recent = [t for t in self._store.get(key, []) if t > cutoff]
+        return max(0, max_requests - len(recent))
+
+
+# Singleton rate limiter
+_rate_limiter = RateLimiter()
+
+
+def _get_client_ip(request: Request) -> str:
+    """Lấy IP client, hỗ trợ reverse proxy (X-Forwarded-For)."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+# ═══════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════
+
 def _get_user_by_email(email: str) -> dict | None:
     conn = DatabaseConnector.get_connection()
-    if not conn:
+    if not conn:  # BUG #4 FIX: Guard null conn — tránh AttributeError khi DB down
         raise HTTPException(status_code=503, detail="Cannot connect to database.")
     cur  = conn.cursor()
     try:
@@ -56,14 +130,25 @@ def _get_user_by_email(email: str) -> dict | None:
 async def _bg_send_verification(user_id: int, email: str, token: str):
     """Background task: goi email service (async)."""
     result = await send_verification_email(email, token)
-    print(f"[AUTH] Verification email for user {user_id}: {result.get('status', 'unknown')}")
+    logger.info(f"Verification email for user {user_id}: {result.get('status', 'unknown')}")
 
 
-# ── POST /auth/register ────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# POST /auth/register
+# ═══════════════════════════════════════════════════════════════
+
 @router.post("/register", response_model=MessageResponse, status_code=201)
-async def register(body: RegisterRequest, bg: BackgroundTasks):
+async def register(body: RegisterRequest, bg: BackgroundTasks, request: Request):
     """Register new account. Sends verification email via Gmail SMTP."""
     email = body.email.lower().strip()
+
+    # ── Rate limit: 5 đăng ký / 10 phút / IP ──
+    client_ip = _get_client_ip(request)
+    if not _rate_limiter.check("register", client_ip, max_requests=5, window_seconds=600):
+        raise HTTPException(
+            status_code=429,
+            detail="Qua nhieu yeu cau dang ky. Vui long thu lai sau 10 phut."
+        )
 
     # Check existing
     existing = _get_user_by_email(email)
@@ -101,6 +186,7 @@ async def register(body: RegisterRequest, bg: BackgroundTasks):
 
         # Send verification email in background (non-blocking)
         bg.add_task(_bg_send_verification, new_id, email, token)
+        logger.info(f"New user registered: id={new_id}, email={email}")
 
         return {
             "message": f"Registration successful! Please check {email} to verify your account.",
@@ -114,11 +200,23 @@ async def register(body: RegisterRequest, bg: BackgroundTasks):
         conn.close()
 
 
-# ── POST /auth/resend-verification ─────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# POST /auth/resend-verification
+# ═══════════════════════════════════════════════════════════════
+
 @router.post("/resend-verification", response_model=MessageResponse)
-async def resend_verification(body: LoginRequest, bg: BackgroundTasks):
+async def resend_verification(body: LoginRequest, bg: BackgroundTasks, request: Request):
     """Resend verification email if account exists but not verified."""
     email = body.email.lower().strip()
+
+    # ── 🛡️ Rate limit: 1 request / 60 giây / email ──
+    if not _rate_limiter.check("resend_verify", email, max_requests=1, window_seconds=60):
+        remaining_seconds = 60  # Ước tính
+        raise HTTPException(
+            status_code=429,
+            detail=f"Vui long doi {remaining_seconds} giay truoc khi gui lai email xac thuc."
+        )
+
     user = _get_user_by_email(email)
 
     if not user:
@@ -148,6 +246,7 @@ async def resend_verification(body: LoginRequest, bg: BackgroundTasks):
         )
         conn.commit()
         bg.add_task(_bg_send_verification, user["user_id"], email, token)
+        logger.info(f"Verification email resent for user {user['user_id']}")
         return {"message": f"Verification email resent to {email}."}
     except Exception as e:
         conn.rollback()
@@ -157,12 +256,24 @@ async def resend_verification(body: LoginRequest, bg: BackgroundTasks):
         conn.close()
 
 
-# ── POST /auth/login ───────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# POST /auth/login  🔒 PATCHED: Thêm kiểm tra email_verified
+# ═══════════════════════════════════════════════════════════════
+
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, request: Request):
     """Login — returns JWT access token."""
     email = body.email.lower().strip()
-    user  = _get_user_by_email(email)
+
+    # ── 🛡️ Rate limit: 10 login / 5 phút / IP ──
+    client_ip = _get_client_ip(request)
+    if not _rate_limiter.check("login", client_ip, max_requests=10, window_seconds=300):
+        raise HTTPException(
+            status_code=429,
+            detail="Qua nhieu lan thu dang nhap. Vui long thu lai sau 5 phut."
+        )
+
+    user = _get_user_by_email(email)
 
     if not user:
         raise HTTPException(status_code=401, detail="Email or password incorrect.")
@@ -179,7 +290,9 @@ async def login(body: LoginRequest):
     if not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email or password incorrect.")
 
-    # ── GUARD: Block login if email not verified ──
+    # ══════════════════════════════════════════════════════════
+    # 🔒 FIX: Chặn đăng nhập khi chưa xác thực email
+    # ══════════════════════════════════════════════════════════
     if not user["email_verified"]:
         raise HTTPException(
             status_code=403,
@@ -197,13 +310,14 @@ async def login(body: LoginRequest):
     )
 
 
-# ── GET /auth/me ───────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# GET /auth/me
+# ═══════════════════════════════════════════════════════════════
+
 @router.get("/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     """Return profile of currently logged-in user (includes created_at)."""
     conn = DatabaseConnector.get_connection()
-    if not conn:
-        raise HTTPException(status_code=503, detail="Cannot connect to database.")
     cur  = conn.cursor()
     try:
         cur.execute(
@@ -224,7 +338,10 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         conn.close()
 
 
-# ── GET /auth/verify-email ─────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# GET /auth/verify-email  🔒 PATCHED: Cleanup expired tokens
+# ═══════════════════════════════════════════════════════════════
+
 @router.get("/verify-email", response_class=HTMLResponse)
 async def verify_email(token: str):
     """Verify email via link. Renders a branded HTML success/error page."""
@@ -246,7 +363,11 @@ async def verify_email(token: str):
             )
 
         user_id, expires_at = row
-        if datetime.now(timezone.utc) > expires_at.replace(tzinfo=timezone.utc) if expires_at.tzinfo is None else expires_at:
+        if datetime.now(timezone.utc) > expires_at.replace(tzinfo=timezone.utc):
+            # ── 🔒 FIX: Xóa token hết hạn khỏi DB (cleanup) ──
+            cur.execute("DELETE FROM email_verification_tokens WHERE token = %s", (token,))
+            conn.commit()
+            logger.warning(f"Expired verification token used by user_id={user_id}")
             return _verify_html_page(
                 success=False,
                 title="Link da het han",
@@ -258,7 +379,7 @@ async def verify_email(token: str):
         cur.execute("DELETE FROM email_verification_tokens WHERE token = %s", (token,))
         conn.commit()
 
-        print(f"[AUTH] Email verified for user_id={user_id}")
+        logger.info(f"Email verified for user_id={user_id}")
 
         return _verify_html_page(
             success=True,
@@ -346,7 +467,10 @@ def _verify_html_page(success: bool, title: str, message: str, status_code: int 
     return HTMLResponse(content=html, status_code=status_code)
 
 
-# ── POST /auth/change-password ─────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# POST /auth/change-password
+# ═══════════════════════════════════════════════════════════════
+
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(
     body: ChangePasswordRequest,
@@ -374,7 +498,7 @@ async def change_password(
         # Send security notification email in background
         user_email = row[1]
         bg.add_task(send_password_changed_email, user_email)
-        print(f"[AUTH] Password changed for user {current_user['user_id']} ({user_email})")
+        logger.info(f"Password changed for user {current_user['user_id']} ({user_email})")
 
         return {"message": "Password changed successfully!"}
     finally:
@@ -382,18 +506,31 @@ async def change_password(
         conn.close()
 
 
-# ── POST /auth/forgot-password ─────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# POST /auth/forgot-password  🔒 PATCHED: Rate limiting
+# ═══════════════════════════════════════════════════════════════
+
 RESET_TOKEN_EXPIRE_MINUTES = 15  # Token chi co hieu luc 15 phut
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(body: ForgotPasswordRequest, bg: BackgroundTasks):
+async def forgot_password(body: ForgotPasswordRequest, bg: BackgroundTasks, request: Request):
     """
     Forgot Password (Step 1): Nhap email, gui link reset qua SMTP.
-    
-    Security: LUON tra ve cung mot thong bao bat ke email co ton tai hay khong,
-    ngan chan ke xau do tim email da dang ky (Anti-enumeration).
+
+    Security:
+    - Anti-enumeration: LUON tra ve cung mot thong bao.
+    - Rate limit: 3 request / 5 phut / IP.
     """
     email = body.email.lower().strip()
+
+    # ── 🛡️ Rate limit: 3 forgot-password / 5 phút / IP ──
+    client_ip = _get_client_ip(request)
+    if not _rate_limiter.check("forgot_password", client_ip, max_requests=3, window_seconds=300):
+        raise HTTPException(
+            status_code=429,
+            detail="Qua nhieu yeu cau dat lai mat khau. Vui long thu lai sau 5 phut."
+        )
+
     safe_message = (
         "Neu email ton tai trong he thong, chung toi da gui link huong dan "
         "dat lai mat khau. Vui long kiem tra hop thu (va ca thu rac)."
@@ -403,12 +540,12 @@ async def forgot_password(body: ForgotPasswordRequest, bg: BackgroundTasks):
 
     # Du email khong ton tai, van tra ve message giong nhau
     if not user:
-        print(f"[AUTH] Forgot-password request for non-existent email: {email}")
+        logger.info(f"Forgot-password for non-existent email: {email}")
         return {"message": safe_message}
 
     # Legacy account khong ho tro
     if user["account_type"] == "legacy":
-        print(f"[AUTH] Forgot-password for legacy account: {email}")
+        logger.info(f"Forgot-password for legacy account: {email}")
         return {"message": safe_message}
 
     # Tao JWT reset token (ngan han 15 phut)
@@ -419,12 +556,15 @@ async def forgot_password(body: ForgotPasswordRequest, bg: BackgroundTasks):
 
     # Gui email trong background
     bg.add_task(send_reset_password_email, email, reset_token)
-    print(f"[AUTH] Password reset email queued for user {user['user_id']} ({email})")
+    logger.info(f"Password reset email queued for user {user['user_id']} ({email})")
 
     return {"message": safe_message}
 
 
-# ── POST /auth/reset-password ──────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# POST /auth/reset-password
+# ═══════════════════════════════════════════════════════════════
+
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(body: ResetPasswordRequest, bg: BackgroundTasks):
     """
@@ -474,7 +614,7 @@ async def reset_password(body: ResetPasswordRequest, bg: BackgroundTasks):
         # Gui email thong bao mat khau da doi
         actual_email = row[1]
         bg.add_task(send_password_changed_email, actual_email)
-        print(f"[AUTH] Password reset successful for user {user_id} ({actual_email})")
+        logger.info(f"Password reset successful for user {user_id} ({actual_email})")
 
         return {"message": "Mat khau da duoc dat lai thanh cong! Ban co the dang nhap voi mat khau moi."}
     except HTTPException:

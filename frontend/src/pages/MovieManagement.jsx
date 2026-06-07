@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
 import MovieFormModal from '../components/MovieFormModal';
+import MovieDetailModal from '../components/MovieDetailModal';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { fixTitle } from '../utils/formatTitle';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2,
-  Film, Loader2, AlertCircle, CheckCircle, Database
+  Film, Loader2, AlertCircle, CheckCircle, Database, Eye,
+  Calendar, Globe, Tv2
 } from 'lucide-react';
 
-// ── Main Page (wrapped in ProtectedRoute) ──────────────────
+// ── Main Page (wrapped in ProtectedRoute) ──────────────────────
 export default function MovieManagement() {
   return (
     <ProtectedRoute requiredRole="admin">
@@ -18,23 +21,27 @@ export default function MovieManagement() {
 }
 
 function MovieManagementInner() {
-  const [movies, setMovies]       = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [page, setPage]           = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal]         = useState(0);
-  const [search, setSearch]       = useState('');
+  const [movies, setMovies]           = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [page, setPage]               = useState(1);
+  const [totalPages, setTotalPages]   = useState(1);
+  const [total, setTotal]             = useState(0);
+  const [search, setSearch]           = useState('');
   const [searchInput, setSearchInput] = useState('');
   const LIMIT = 15;
 
   // Modal state
-  const [modalOpen, setModalOpen]       = useState(false);
-  const [modalMode, setModalMode]       = useState('create'); // 'create' | 'edit'
-  const [editingMovie, setEditingMovie] = useState(null);
+  const [modalOpen, setModalOpen]         = useState(false);
+  const [modalMode, setModalMode]         = useState('create');
+  const [editingMovie, setEditingMovie]   = useState(null);
+
+  // Detail modal
+  const [detailMovie, setDetailMovie]     = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // Delete confirm
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleting, setDeleting]         = useState(false);
+  const [deleteTarget, setDeleteTarget]   = useState(null);
+  const [deleting, setDeleting]           = useState(false);
 
   // Toast
   const [toast, setToast] = useState(null);
@@ -43,7 +50,7 @@ function MovieManagementInner() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // ── Fetch Movies ──────────────────────────────────────────
+  // ── Fetch Movies ───────────────────────────────────────────
   const fetchMovies = useCallback(async () => {
     setLoading(true);
     try {
@@ -54,7 +61,6 @@ function MovieManagementInner() {
       setTotal(res.data.total);
       setTotalPages(res.data.total_pages);
     } catch (err) {
-      console.error('[Admin Movies]', err.message);
       showToast(err.message, 'error');
     }
     setLoading(false);
@@ -62,38 +68,50 @@ function MovieManagementInner() {
 
   useEffect(() => { fetchMovies(); }, [fetchMovies]);
 
-  // ── Search handler ────────────────────────────────────────
+  // ── Search ─────────────────────────────────────────────────
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
     setSearch(searchInput.trim());
   };
+  const clearSearch = () => { setSearchInput(''); setSearch(''); setPage(1); };
 
-  const clearSearch = () => {
-    setSearchInput('');
-    setSearch('');
-    setPage(1);
+  // ── Open Detail Modal ──────────────────────────────────────
+  const openDetail = async (movie) => {
+    // Dùng data đã có từ list (có thể thiếu avg_rating) → fetch detail đầy đủ
+    setDetailMovie(movie);
+    setDetailLoading(true);
+    try {
+      const res = await api.get(`/admin/movies/${movie.movie_id}`);
+      setDetailMovie(res.data);
+    } catch {
+      // fallback: dùng data list
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
-  // ── CRUD handlers ─────────────────────────────────────────
+  // ── CRUD handlers ──────────────────────────────────────────
   const openCreate = () => {
     setEditingMovie(null);
     setModalMode('create');
     setModalOpen(true);
   };
 
-  const openEdit = (movie) => {
+  const openEdit = (movie, e) => {
+    e.stopPropagation(); // không trigger openDetail
     setEditingMovie(movie);
     setModalMode('edit');
     setModalOpen(true);
   };
 
-  const handleSave = async ({ title, genres_str, movie_id }) => {
+  const handleSave = async ({ title, genres_str, release_year, country, total_episodes, description, movie_id }) => {
+    const payload = { title, genres_str, release_year, country, total_episodes, description };
     if (modalMode === 'create') {
-      await api.post('/admin/movies/', { title, genres_str });
+      await api.post('/admin/movies/', payload);
       showToast(`Đã thêm phim "${title}"`);
     } else {
-      await api.put(`/admin/movies/${movie_id}`, { title, genres_str });
+      await api.put(`/admin/movies/${movie_id}`, payload);
       showToast(`Đã cập nhật phim #${movie_id}`);
     }
     fetchMovies();
@@ -113,12 +131,8 @@ function MovieManagementInner() {
     setDeleting(false);
   };
 
-  // ── Pagination ────────────────────────────────────────────
-  const gotoPage = (p) => {
-    if (p >= 1 && p <= totalPages) setPage(p);
-  };
-
-  // Tạo danh sách page numbers hiển thị
+  // ── Pagination ─────────────────────────────────────────────
+  const gotoPage = (p) => { if (p >= 1 && p <= totalPages) setPage(p); };
   const pageNums = [];
   const maxVisible = 5;
   let start = Math.max(1, page - Math.floor(maxVisible / 2));
@@ -126,7 +140,7 @@ function MovieManagementInner() {
   if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1);
   for (let i = start; i <= end; i++) pageNums.push(i);
 
-  // ── RENDER ────────────────────────────────────────────────
+  // ── RENDER ─────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       {/* Header */}
@@ -139,9 +153,7 @@ function MovieManagementInner() {
             </div>
             <div>
               <h1 className="text-xl font-bold">Quản lý Phim</h1>
-              <p className="text-xs text-gray-500">
-                {total.toLocaleString()} phim trong cơ sở dữ liệu
-              </p>
+              <p className="text-xs text-gray-500">{total.toLocaleString()} phim · Click vào hàng để xem chi tiết</p>
             </div>
           </div>
 
@@ -162,9 +174,7 @@ function MovieManagementInner() {
               </div>
               {search && (
                 <button type="button" onClick={clearSearch}
-                  className="text-xs text-gray-400 hover:text-white transition">
-                  Xóa
-                </button>
+                  className="text-xs text-gray-400 hover:text-white transition">Xóa</button>
               )}
             </form>
 
@@ -187,11 +197,12 @@ function MovieManagementInner() {
       <div className="max-w-7xl mx-auto px-4 lg:px-8 pb-8">
         <div className="bg-zinc-900/80 border border-white/5 rounded-xl overflow-hidden">
           {/* Table Header */}
-          <div className="grid grid-cols-[80px_1fr_1fr_100px] gap-4 px-5 py-3
+          <div className="grid grid-cols-[70px_1fr_160px_100px_90px] gap-3 px-5 py-3
                           bg-white/5 text-xs text-gray-400 font-semibold uppercase tracking-wider">
             <span>ID</span>
             <span>Tên phim</span>
             <span>Thể loại</span>
+            <span>Năm / Nước</span>
             <span className="text-center">Thao tác</span>
           </div>
 
@@ -214,38 +225,77 @@ function MovieManagementInner() {
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.02 }}
-                  className="grid grid-cols-[80px_1fr_1fr_100px] gap-4 px-5 py-3.5
-                             items-center hover:bg-white/[0.03] transition group"
+                  onClick={() => openDetail(m)}
+                  className="grid grid-cols-[70px_1fr_160px_100px_90px] gap-3 px-5 py-3.5
+                             items-center hover:bg-white/[0.04] transition group cursor-pointer"
                 >
                   {/* ID */}
                   <span className="text-sm text-gray-500 font-mono">#{m.movie_id}</span>
 
-                  {/* Title */}
-                  <span className="text-sm text-white font-medium truncate">{m.title}</span>
+                  {/* Title + meta chips */}
+                  <div className="min-w-0">
+                    <p className="text-sm text-white font-medium truncate">{fixTitle(m.title)}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {m.release_year && (
+                        <span className="flex items-center gap-0.5 text-[10px] text-gray-500">
+                          <Calendar size={9} />{m.release_year}
+                        </span>
+                      )}
+                      {m.country && (
+                        <span className="flex items-center gap-0.5 text-[10px] text-gray-500">
+                          <Globe size={9} />{m.country}
+                        </span>
+                      )}
+                      {m.total_episodes && (
+                        <span className="flex items-center gap-0.5 text-[10px] text-blue-400">
+                          <Tv2 size={9} />{m.total_episodes} tập
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
                   {/* Genres */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {(m.genres_orig || '').split('|').filter(Boolean).map(g => (
+                  <div className="flex flex-wrap gap-1">
+                    {(m.genres_orig || '').split('|').filter(Boolean).slice(0, 3).map(g => (
                       <span key={g}
-                        className="px-2 py-0.5 rounded-full text-[10px] font-medium
+                        className="px-1.5 py-0.5 rounded text-[10px] font-medium
                                    bg-white/5 text-gray-400 border border-white/5">
                         {g.trim()}
                       </span>
                     ))}
+                    {(m.genres_orig || '').split('|').filter(Boolean).length > 3 && (
+                      <span className="text-[10px] text-gray-600">
+                        +{(m.genres_orig || '').split('|').filter(Boolean).length - 3}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Year / Country */}
+                  <div className="text-xs text-gray-500 space-y-0.5">
+                    {m.release_year && <p>{m.release_year}</p>}
+                    {m.country && <p className="truncate">{m.country}</p>}
+                    {!m.release_year && !m.country && <p className="text-gray-700 italic">—</p>}
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center justify-center gap-1.5
-                                  opacity-40 group-hover:opacity-100 transition">
+                  <div className="flex items-center justify-center gap-1
+                                  opacity-0 group-hover:opacity-100 transition">
                     <button
-                      onClick={() => openEdit(m)}
+                      onClick={(e) => { e.stopPropagation(); openDetail(m); }}
+                      className="p-2 rounded-lg hover:bg-blue-500/10 text-blue-400 transition"
+                      title="Xem chi tiết"
+                    >
+                      <Eye size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => openEdit(m, e)}
                       className="p-2 rounded-lg hover:bg-amber-500/10 text-amber-400 transition"
                       title="Sửa"
                     >
                       <Pencil size={14} />
                     </button>
                     <button
-                      onClick={() => setDeleteTarget(m)}
+                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(m); }}
                       className="p-2 rounded-lg hover:bg-red-500/10 text-red-400 transition"
                       title="Xóa"
                     >
@@ -287,7 +337,17 @@ function MovieManagementInner() {
         </div>
       </div>
 
-      {/* Movie Form Modal */}
+      {/* ── Movie Detail Modal ────────────────────────────────── */}
+      <AnimatePresence>
+        {detailMovie && !modalOpen && !deleteTarget && (
+          <MovieDetailModal
+            movie={detailMovie}
+            onClose={() => setDetailMovie(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Movie Form Modal ──────────────────────────────────── */}
       <AnimatePresence>
         {modalOpen && (
           <MovieFormModal
@@ -299,7 +359,7 @@ function MovieManagementInner() {
         )}
       </AnimatePresence>
 
-      {/* Delete Confirmation */}
+      {/* ── Delete Confirmation ───────────────────────────────── */}
       <AnimatePresence>
         {deleteTarget && (
           <>
@@ -322,30 +382,21 @@ function MovieManagementInner() {
                   <Trash2 size={24} className="text-red-400" />
                 </div>
                 <h3 className="text-lg font-bold mb-1">Xác nhận xóa</h3>
-                <p className="text-sm text-gray-400 mb-1">
-                  Bạn có chắc muốn xóa phim:
-                </p>
-                <p className="text-sm text-white font-semibold mb-1">
-                  "{deleteTarget.title}"
-                </p>
+                <p className="text-sm text-gray-400 mb-1">Bạn có chắc muốn xóa phim:</p>
+                <p className="text-sm text-white font-semibold mb-1">"{deleteTarget.title}"</p>
                 <p className="text-xs text-gray-500 mb-5">
                   ID #{deleteTarget.movie_id} — Tất cả ratings liên quan cũng sẽ bị xóa.
                 </p>
                 <div className="flex gap-3">
                   <button
-                    onClick={() => setDeleteTarget(null)}
-                    disabled={deleting}
+                    onClick={() => setDeleteTarget(null)} disabled={deleting}
                     className="flex-1 py-2.5 rounded-lg text-sm font-medium text-gray-400
                                bg-white/5 border border-white/10 hover:bg-white/10 transition"
-                  >
-                    Hủy
-                  </button>
+                  >Hủy</button>
                   <button
-                    onClick={confirmDelete}
-                    disabled={deleting}
+                    onClick={confirmDelete} disabled={deleting}
                     className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white
-                               bg-red-600 hover:bg-red-500
-                               disabled:opacity-50 transition-all
+                               bg-red-600 hover:bg-red-500 disabled:opacity-50 transition-all
                                flex items-center justify-center gap-2"
                   >
                     {deleting && <Loader2 size={14} className="animate-spin" />}
@@ -358,7 +409,7 @@ function MovieManagementInner() {
         )}
       </AnimatePresence>
 
-      {/* Toast */}
+      {/* ── Toast ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {toast && (
           <motion.div
@@ -367,9 +418,7 @@ function MovieManagementInner() {
             exit={{ opacity: 0, y: 50, x: '-50%' }}
             className={`fixed bottom-8 left-1/2 z-[300] px-6 py-3 rounded-xl shadow-2xl
                         flex items-center gap-2 font-medium text-sm
-                        ${toast.type === 'success'
-                          ? 'bg-green-600 text-white'
-                          : 'bg-red-600 text-white'}`}
+                        ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}
           >
             {toast.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
             {toast.msg}

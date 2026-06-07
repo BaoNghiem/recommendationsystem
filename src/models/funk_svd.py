@@ -59,11 +59,16 @@ class FunkSVDModel:
 
                 # Cập nhật ma trận P và Q theo hướng ngược chiều Gradient
                 # reg * factor là thành phần Regularization để kìm hãm model không học quá chi tiết tập train
-                u_f = self.user_factors[u]
-                m_f = self.item_factors[m]
-                
+                #
+                # BUG A FIX: Dung .copy() thay vi giu view cua numpy array.
+                # Neu khong copy: u_f = self.user_factors[u] la VIEW, khi update user_factors[u]
+                # in-place thi u_f cung thay doi theo, khien item_factors duoc update bang gia tri SAI.
+                u_f = self.user_factors[u].copy()   # snapshot truoc khi update
+                m_f = self.item_factors[m].copy()   # snapshot truoc khi update
+
                 self.user_factors[u] += self.lr * (error * m_f - self.reg * u_f)
                 self.item_factors[m] += self.lr * (error * u_f - self.reg * m_f)
+
             
             rmse = np.sqrt(total_error / len(ratings))
             print(f"Epoch {epoch+1}/{self.n_epochs} - Train RMSE: {rmse:.4f}")
@@ -72,8 +77,15 @@ class FunkSVDModel:
         """
         Du doan diem rating cho mot cap (user, item).
         Tra ve dot product cua 2 vector latent factors.
+
+        Note (Bug #7 — design choice): FunkSVD nay khong dung explicit bias terms
+        (global_mean + user_bias + item_bias). Cac latent factors da hap thu toan
+        bo bias trong qua trinh SGD training (vi train tren raw ratings 1-5).
+        => predict() PHAI nhat quan voi fit(): chi dung dot product, khong cong global_mean.
+        Clip ve [0.5, 5.0] duoc thuc hien o tang engine_wrapper.predict_rating().
         """
         return float(np.dot(self.user_factors[user_idx], self.item_factors[movie_idx]))
+
 
     def predict_batch(self, user_indices, movie_indices):
         """

@@ -3,6 +3,7 @@ import axios from '../api/axios';
 import MovieRow from '../components/MovieRow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Film, ChevronLeft, ChevronRight, Loader2, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { fixTitle, getPosterUrl } from '../utils/formatTitle';
 
 // Mapping genre key -> display label (phai dong bo voi Backend)
 const GENRE_LABELS = {
@@ -217,9 +218,10 @@ function MovieCard({ movie, onRate, savedRating }) {
       {/* Poster */}
       <div className="aspect-[2/3] relative overflow-hidden">
         <img
-          src={`https://placehold.co/300x450/1a1a2e/ffffff?text=${encodeURIComponent(movie.title.substring(0, 20))}`}
+          src={getPosterUrl(movie)}
           alt={movie.title}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          loading="lazy"
+          className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-300"
         />
         {/* Rating badge */}
         {movie.rating_count > 0 && (

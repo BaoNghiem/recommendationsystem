@@ -125,8 +125,9 @@ if cold_token and inserted_ids:
 # ══════════════════════════════════════════════════════════════
 section("2.4 Fold-In Audit: /recommend/{user_id}")
 
-if cold_uid:
-    r = requests.get(f"{BASE}/recommend/{cold_uid}")
+if cold_uid and cold_token:
+    # BUG B FIX: Them Authorization header (COLD_H) de pass JWT guard
+    r = requests.get(f"{BASE}/recommend/{cold_uid}", headers=COLD_H)
     if r.status_code == 200:
         data = r.json()
         strategy = data.get("strategy", "")
@@ -173,6 +174,7 @@ with open(out_path, "w", encoding="utf-8") as f:
         "results": results,
         "cold_uid": cold_uid,
         "cold_email": cold_email,
+        "cold_token": cold_token,   # BUG B FIX: Luu token de phase4 su dung
         "anime_ids_rated": anime_ids_rated,
     }, f, ensure_ascii=False, indent=2)
 

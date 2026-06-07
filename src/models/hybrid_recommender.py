@@ -67,18 +67,52 @@ class HybridRecommender:
                 gender = user_info['gender_mapped'].values[0]
                 return self.demographic_pop.get(gender, self.global_popularity.index[:top_n].tolist())
             return self.global_popularity.index[:top_n].tolist()
-            
+
         # TRUONG HOP 2: HYBRID FOR EXISTING USERS
-        # (Trong thuc te ta se predict cho cac phim chua xem va lay Top N)
-        # De demo hieu qua, ta gia dinh lay top tu global pop va re-rank bang Hybrid score
-        candidate_movies = self.global_popularity.index[:300] # Lay 300 phim lam ung vien (tang tu 100)
+        #
+        # BUG #10 FIX: Su dung TOAN BO phim co trong global_popularity
+        # (thay vi chi [:300]) de Hybrid Engine moi thuc su hieu qua.
+        #
+        # Van de cu: Voi [:300], 92% phim (3583/3883) khong bao gio duoc
+        # xet den du FunkSVD co the doan diem cao cho chung. Nguoi dung
+        # co so thich niche (Documentary, Film-Noir, Animation) se nhan
+        # goi y kem chat luong vi pool bi gioi han o top pho bien.
+        #
+        # Hieu nang: Dataset co ~3883 phim. Viec mo rong pool khong anh
+        # huong dang ke vi:
+        #   - SVD: duoc vectorize (dot product hang loat, < 5ms)
+        #   - CB:  tra cuu hang cua numpy matrix, O(|lich su user|)
+        # Tong thoi gian uoc tinh: < 100ms cho toan bo 3883 phim.
+        candidate_movies = self.global_popularity.index  # Toan bo phim da co rating
         user_seen = set(self.user_history.get(user_idx, []))
-        
+
+        # Loc candidates chua xem
+        all_candidates = [int(m) for m in candidate_movies if m not in user_seen]
+        if not all_candidates:
+            return self.global_popularity.index[:top_n].tolist()
+
+        # ── Vectorize SVD scoring (nhanh hon vong lap Python ~50x) ──
+        # Thay vi goi self.svd.predict() tung cai, tinh dot product hang loat
+        Q = self.svd.item_factors        # (n_items, n_factors)
+        P_u = self.svd.user_factors[user_idx]  # (n_factors,)
+        n_items = Q.shape[0]
+
+        # Chi giu candidates nam trong pham vi item_factors
+        valid_candidates = [m for m in all_candidates if m < n_items]
+        if not valid_candidates:
+            return self.global_popularity.index[:top_n].tolist()
+
+        Q_candidates = Q[valid_candidates]      # (n_candidates, n_factors)
+        svd_scores = Q_candidates @ P_u         # (n_candidates,) — batch dot product
+
+        # ── Content-Based scoring (van theo tung phim) ──
+        user_movies = self.user_history.get(user_idx, [])
         scores = []
-        for m_idx in candidate_movies:
-            if m_idx in user_seen: continue
-            score = self.predict_hybrid(user_idx, m_idx)
-            scores.append((m_idx, score))
-            
+        for i, m_idx in enumerate(valid_candidates):
+            cb_score = self.cb.get_content_score(m_idx, user_movies)
+            cb_score_scaled = 1 + cb_score * 4  # Chuan hoa [0,1] -> [1,5]
+            hybrid_score = self.alpha * float(svd_scores[i]) + (1 - self.alpha) * cb_score_scaled
+            scores.append((m_idx, hybrid_score))
+
         scores.sort(key=lambda x: x[1], reverse=True)
         return [x[0] for x in scores[:top_n]]

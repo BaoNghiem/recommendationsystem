@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, Bell, User, LogOut, ShieldCheck, Home, Database, Users, X, ChevronDown, Film,
   Swords, Mountain, Clapperboard, Baby, Laugh, Fingerprint, BookOpen, Drama, Sparkles,
   Moon, Skull, Music, HelpCircle, Heart, Atom, Crosshair, Shield, Wheat, UserCircle,
-  Loader2, BarChart3
+  Loader2, BarChart3, UserCircle2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import axios from '../api/axios';
+import { fixTitle } from '../utils/formatTitle';
 
 // ── Genre icons & data ────────────────────────────────────
 const GENRE_ITEMS = [
@@ -278,6 +279,7 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
 
           {isAdmin && navLink('dashboard', 'Dashboard', <BarChart3 size={14} />)}
           {isAdmin && navLink('admin', 'Quan ly phim', <Database size={14} />)}
+          {isAdmin && navLink('people', 'Dien vien', <UserCircle2 size={14} />)}
           {isAdmin && navLink('users', 'Quan ly nguoi dung', <Users size={14} />)}
         </ul>
       </div>
@@ -340,7 +342,7 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm text-white font-medium truncate group-hover:text-red-400 transition-colors">
-                        {movie.title}
+                        {fixTitle(movie.title)}
                       </p>
                       <p className="text-[10px] text-gray-500 truncate">
                         {movie.genres_orig?.split('|').join(' · ')}
@@ -438,6 +440,14 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
                     >
                       <Database size={15} />
                       Quan ly phim
+                    </button>
+                    <button
+                      onClick={() => { onNavigate?.('people'); setShowMenu(false); }}
+                      className="w-full flex items-center gap-2 px-4 py-3 text-sm text-violet-400
+                                 hover:bg-violet-500/10 transition border-b border-white/5"
+                    >
+                      <UserCircle2 size={15} />
+                      Dien vien & Dao dien
                     </button>
                     <button
                       onClick={() => { onNavigate?.('users'); setShowMenu(false); }}

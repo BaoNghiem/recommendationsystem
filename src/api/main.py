@@ -34,6 +34,7 @@ if sys.platform.startswith('win'):
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -76,6 +77,7 @@ from src.api.routes.recommendations import router as rec_router
 from src.api.routes.public         import router as public_router
 from src.api.routes.admin_movies   import router as admin_movies_router
 from src.api.routes.admin_users    import router as admin_users_router
+from src.api.routes.admin_people   import router as admin_people_router
 from src.api.routes.ratings        import router as ratings_router
 
 # Inject engine into recommendations router
@@ -92,18 +94,28 @@ app.include_router(rec_router)            # /recommend/*
 app.include_router(public_router)         # /trending, /popular, /rate, /user-ratings
 app.include_router(admin_movies_router)   # /admin/movies/*
 app.include_router(admin_users_router)    # /admin/stats, /admin/users/*
+app.include_router(admin_people_router)   # /admin/directors/*, /admin/actors/*, /admin/movies/{id}/cast
 app.include_router(ratings_router)        # /ratings/me
+
+# ── Serve uploaded poster images ──────────────────────────
+UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+(UPLOADS_DIR / "posters").mkdir(exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 logger.info("=" * 60)
 logger.info("  ALL ROUTERS REGISTERED:")
 logger.info("     /auth/*            (Auth: login, register, verify)")
-logger.info("     /movies/*          (Movies: list, search, detail)")
+logger.info("     /movies/*          (Movies: list, search+cast, detail+cast)")
 logger.info("     /recommend/*       (AI Recommendations)")
 logger.info("     /trending, /popular, /rate, /user-ratings")
 logger.info("     /admin/stats       (Admin: system stats)")
-logger.info("     /admin/movies/*    (Admin: Movie CRUD)")
+logger.info("     /admin/movies/*    (Admin: Movie CRUD + Cast)")
+logger.info("     /admin/directors/* (Admin: Director CRUD)")
+logger.info("     /admin/actors/*    (Admin: Actor CRUD)")
 logger.info("     /admin/users/*     (Admin: User CRUD)")
 logger.info("     /ratings/*         (User ratings history)")
+logger.info("     /api/uploads/*     (Static: poster images)")
 logger.info("=" * 60)
 
 

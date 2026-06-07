@@ -4,7 +4,7 @@ Ratings Routes: /ratings/me
 API cho user xem lich su danh gia cua chinh minh.
 """
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from src.database.db_config import DatabaseConnector
 from src.api.auth.dependencies import get_current_user
 
@@ -12,10 +12,15 @@ router = APIRouter(prefix="/ratings", tags=["Ratings"])
 
 
 @router.get("/me")
-async def my_ratings(current_user: dict = Depends(get_current_user)):
+async def my_ratings(
+    page: int = Query(1, ge=1, description="Trang hien tai (bat dau tu 1)"),
+    page_size: int = Query(200, ge=1, le=500, description="So danh gia moi trang"),
+    current_user: dict = Depends(get_current_user),
+):
     """
-    Tra ve tat ca ratings cua user dang login,
-    kem thong tin phim (title, genres) de hien thi tren Profile.
+    Tra ve ratings cua user dang login co phan trang.
+    - page:      trang hien tai (mac dinh 1)
+    - page_size: so muc moi trang (mac dinh 200 de tuong thich nguoc)
     """
     uid = current_user["user_id"]
     conn = DatabaseConnector.get_connection()
@@ -23,19 +28,23 @@ async def my_ratings(current_user: dict = Depends(get_current_user)):
         raise HTTPException(503, "Cannot connect to database.")
     cur = conn.cursor()
     try:
+        # Dem tong so ratings cua user
+        cur.execute("SELECT COUNT(*) FROM ratings WHERE user_id = %s", (uid,))
+        total = cur.fetchone()[0]
+
+        offset = (page - 1) * page_size
         cur.execute(
-            """SELECT r.movie_id, m.title, m.genres_orig, r.rating, r.timestamp
+            """SELECT r.movie_id, m.title, m.genres_orig, r.rating, r.timestamp, m.poster_url
                FROM ratings r
                JOIN movies m ON r.movie_id = m.movie_id
                WHERE r.user_id = %s
                ORDER BY r.timestamp DESC
-               LIMIT 200""",
-            (uid,),
+               LIMIT %s OFFSET %s""",
+            (uid, page_size, offset),
         )
         rows = cur.fetchall()
         ratings = []
         for r in rows:
-            # timestamp is bigint (Unix epoch seconds), convert to ISO string
             ts = r[4]
             ts_str = None
             if ts:
@@ -49,11 +58,15 @@ async def my_ratings(current_user: dict = Depends(get_current_user)):
                 "genres_orig": r[2],
                 "rating":      float(r[3]),
                 "timestamp":   ts_str,
+                "poster_url":  r[5],
             })
         return {
-            "user_id": uid,
-            "total":   len(ratings),
-            "ratings": ratings,
+            "user_id":   uid,
+            "total":     total,
+            "page":      page,
+            "page_size": page_size,
+            "pages":     max(1, -(-total // page_size)),  # ceiling division
+            "ratings":   ratings,
         }
     except Exception as e:
         raise HTTPException(500, f"Error: {e}")

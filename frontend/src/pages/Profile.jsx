@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   User, Mail, Shield, Calendar, Star, Film, Clock,
-  ChevronDown, ChevronUp, Loader2, LogOut, MailCheck, MailX,
-  Trash2, Lock, Eye, EyeOff, X, AlertTriangle, CheckCircle, Compass
+  ChevronLeft, ChevronRight, Loader2, LogOut, MailCheck, MailX,
+  Trash2, Lock, Eye, EyeOff, X, AlertTriangle, CheckCircle, Compass,
+  Search
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { fixTitle, getPosterUrl } from '../utils/formatTitle';
 
 export default function Profile() {
   return (
@@ -22,10 +24,12 @@ function ProfileInner() {
   const [ratings, setRatings] = useState([]);
   const [totalRatings, setTotalRatings] = useState(0);
   const [loadingRatings, setLoadingRatings] = useState(true);
-  const [showAll, setShowAll] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [profileData, setProfileData] = useState(null);
   const [showPwModal, setShowPwModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   // Stats
   const avgRating = ratings.length > 0
@@ -77,7 +81,13 @@ function ProfileInner() {
     setDeletingId(movieId);
     try {
       await api.delete(`/ratings/me/${movieId}`);
-      setRatings(prev => prev.filter(r => r.movie_id !== movieId));
+      setRatings(prev => {
+        const next = prev.filter(r => r.movie_id !== movieId);
+        // Reset to last valid page if current page becomes empty after delete
+        const newTotalPages = Math.max(1, Math.ceil((next.length) / PAGE_SIZE));
+        setCurrentPage(p => Math.min(p, newTotalPages));
+        return next;
+      });
       setTotalRatings(prev => prev - 1);
     } catch (err) {
       console.error('[Profile] Delete rating error:', err.message);
@@ -85,7 +95,20 @@ function ProfileInner() {
     setDeletingId(null);
   };
 
-  const displayRatings = showAll ? ratings : ratings.slice(0, 10);
+  // Lọc theo từ khóa tìm kiếm (tên phim hoặc thể loại)
+  const filteredRatings = searchQuery.trim()
+    ? ratings.filter(r => {
+        const q = searchQuery.toLowerCase();
+        return (fixTitle(r.title) || '').toLowerCase().includes(q)
+            || (r.genres_orig || '').toLowerCase().includes(q);
+      })
+    : ratings;
+
+  const totalPages = Math.ceil(filteredRatings.length / PAGE_SIZE);
+  const displayRatings = filteredRatings.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
 
   const starColor = (val) => {
     if (val >= 4) return 'text-green-400';
@@ -93,9 +116,7 @@ function ProfileInner() {
     return 'text-red-400';
   };
 
-  const getPosterUrl = (title) => {
-    return `https://placehold.co/60x90/141414/ffffff?text=${encodeURIComponent(title?.substring(0, 10) || '?')}`;
-  };
+  // getPosterUrl duoc import tu formatTitle.js — ho tro poster_url that tu DB
 
   const joinDate = profileData?.created_at
     ? new Date(profileData.created_at).toLocaleDateString('vi-VN', { year: 'numeric', month: 'long', day: 'numeric' })
@@ -222,12 +243,49 @@ function ProfileInner() {
 
         {/* ── Rating History ─────────────────────────────── */}
         <div className="bg-zinc-900/60 border border-white/5 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock size={16} className="text-gray-500" />
-              <h3 className="font-semibold">Lich su danh gia</h3>
-              <span className="text-xs text-gray-500">({totalRatings} phim)</span>
+          <div className="px-5 py-4 border-b border-white/5">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-gray-500" />
+                <h3 className="font-semibold">Lich su danh gia</h3>
+                <span className="text-xs text-gray-500">({totalRatings} phim)</span>
+              </div>
+
+              {/* Thanh tìm kiếm */}
+              {ratings.length > 0 && (
+                <div className="relative w-full sm:w-64">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                    placeholder="Tim phim da danh gia..."
+                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-8 py-2 text-sm
+                               text-white placeholder-gray-600 focus:border-red-500/50 focus:outline-none
+                               transition"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => { setSearchQuery(''); setCurrentPage(1); }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500
+                                 hover:text-white transition"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
+
+            {/* Kết quả tìm kiếm */}
+            {searchQuery.trim() && (
+              <p className="text-xs text-gray-500 mt-2">
+                Tim thay <span className="text-white font-medium">{filteredRatings.length}</span> phim
+                {filteredRatings.length !== ratings.length && (
+                  <> phu hop voi "<span className="text-red-400">{searchQuery}</span>"</>
+                )}
+              </p>
+            )}
           </div>
 
           {loadingRatings ? (
@@ -281,27 +339,25 @@ function ProfileInner() {
             </div>
           ) : (
             <>
-              <div className="divide-y divide-white/[0.03]">
-                <AnimatePresence initial={false}>
-                  {displayRatings.map((r, i) => (
+              <div className="divide-y divide-white/[0.03]" key={`list-${searchQuery}`}>
+                {displayRatings.map((r, i) => (
                     <motion.div
                       key={r.movie_id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20, height: 0 }}
-                      transition={{ delay: i * 0.02 }}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: Math.min(i * 0.02, 0.3) }}
                       className="px-5 py-3 flex items-center gap-4 hover:bg-white/[0.02] transition group"
                     >
                       {/* Poster */}
                       <img
-                        src={getPosterUrl(r.title)}
+                        src={getPosterUrl(r)}
                         alt={r.title}
                         className="w-[40px] h-[60px] rounded object-cover border border-white/10 shrink-0"
                       />
 
                       {/* Title + genres */}
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{r.title}</p>
+                        <p className="text-sm font-medium text-white truncate">{fixTitle(r.title)}</p>
                         <p className="text-[10px] text-gray-600 truncate">
                           {r.genres_orig?.split('|').join(' · ')}
                         </p>
@@ -343,23 +399,38 @@ function ProfileInner() {
                       </button>
                     </motion.div>
                   ))}
-                </AnimatePresence>
               </div>
 
-              {/* Show more/less */}
-              {ratings.length > 10 && (
-                <button
-                  onClick={() => setShowAll(p => !p)}
-                  className="w-full py-3 text-sm font-medium text-gray-400 hover:text-white
-                             bg-white/[0.02] hover:bg-white/[0.04] transition
-                             flex items-center justify-center gap-1 border-t border-white/5"
-                >
-                  {showAll ? (
-                    <><ChevronUp size={14} /> Thu gon</>
-                  ) : (
-                    <><ChevronDown size={14} /> Xem tat ca {totalRatings} danh gia</>
-                  )}
-                </button>
+              {/* Pagination controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-5 py-3 border-t border-white/5
+                               bg-white/[0.01]">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                               text-gray-400 hover:text-white bg-white/5 hover:bg-white/10
+                               disabled:opacity-30 disabled:cursor-not-allowed transition"
+                  >
+                    <ChevronLeft size={14} /> Trang truoc
+                  </button>
+
+                  <span className="text-xs text-gray-500">
+                    Trang <span className="text-white font-semibold">{currentPage}</span>
+                    {' '}/ <span className="text-white font-semibold">{totalPages}</span>
+                    <span className="ml-2 text-gray-600">({filteredRatings.length} phim)</span>
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                               text-gray-400 hover:text-white bg-white/5 hover:bg-white/10
+                               disabled:opacity-30 disabled:cursor-not-allowed transition"
+                  >
+                    Trang sau <ChevronRight size={14} />
+                  </button>
+                </div>
               )}
             </>
           )}

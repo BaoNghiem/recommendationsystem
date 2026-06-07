@@ -28,26 +28,26 @@ async def get_trending(response: Response, limit: int = 15):
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT m.movie_id, m.title, m.genres_orig,
+            SELECT m.movie_id, m.title, m.genres_orig, m.poster_url,
                    ROUND(AVG(r.rating)::numeric, 1) AS avg_rating,
                    COUNT(r.rating) AS vote_count
             FROM movies m
             JOIN ratings r ON m.movie_id = r.movie_id
-            GROUP BY m.movie_id, m.title, m.genres_orig
+            GROUP BY m.movie_id, m.title, m.genres_orig, m.poster_url
             HAVING COUNT(r.rating) > 50
             ORDER BY AVG(r.rating) DESC, COUNT(r.rating) DESC
             LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
-        cur.close()
         return [
             {
-                "movie_id": r[0], "title": r[1], "genres_orig": r[2],
-                "avg_rating": float(r[3]), "vote_count": r[4],
+                "movie_id": r[0], "title": r[1], "genres_orig": r[2], "poster_url": r[3],
+                "avg_rating": float(r[4]), "vote_count": r[5],
             }
             for r in rows
         ]
     finally:
+        cur.close()
         conn.close()
 
 
@@ -62,21 +62,22 @@ async def get_latest(response: Response, limit: int = 10):
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT movie_id, title, genres_orig
+            SELECT movie_id, title, genres_orig, poster_url
             FROM movies
             WHERE title IS NOT NULL AND title != ''
             ORDER BY movie_id DESC
             LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
-        cur.close()
         return [
             {
                 "movie_id": r[0], "title": r[1], "genres_orig": r[2] or "",
+                "poster_url": r[3],
             }
             for r in rows
         ]
     finally:
+        cur.close()
         conn.close()
 
 
@@ -127,8 +128,14 @@ async def get_user_ratings(
 ):
     """Tra ve tat ca rating ma User da luu trong DB (dict: movie_id -> rating)."""
     response.headers["Cache-Control"] = "no-store"
-    # Security: chi cho phep xem rating cua chinh minh
     uid = current_user["user_id"]
+
+    # BUG #3 FIX: IDOR Protection — chi cho phep xem rating cua chinh minh
+    if uid != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: you can only view your own ratings."
+        )
 
     conn = DatabaseConnector.get_connection()
     if not conn:
@@ -173,11 +180,12 @@ async def rate_movie(data: RateRequest, current_user: dict = Depends(get_current
         conn.commit()
         logger.debug("Rate OK: User %d -> Movie %d -> %.1f stars", uid, mid, rat)
 
-        # Xoa cache fold-in de lan goi y tiep theo tinh lai vector AI moi nhat
+        # BUG #8 FIX: Dung engine da duoc inject vao recommendations module
+        # thay vi goi RecommendationEngine() constructor (Singleton nhung pattern kho hieu)
         try:
-            from src.api.engine_wrapper import RecommendationEngine
-            engine = RecommendationEngine()
-            engine.invalidate_fold_in_cache(uid)
+            from src.api.routes.recommendations import recommender_engine
+            if recommender_engine is not None:
+                recommender_engine.invalidate_fold_in_cache(uid)
         except Exception:
             pass  # Khong de loi cache anh huong den rating
 
