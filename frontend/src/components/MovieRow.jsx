@@ -166,12 +166,7 @@ const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} 
                           <Info size={16} className="text-white" />
                         </button>
 
-                        {/* AI Match Score */}
-                        {movie.predicted_rating && (
-                          <span className="text-green-400 font-bold text-xs">
-                            ★ {movie.predicted_rating}
-                          </span>
-                        )}
+                        {/* Removed AI Match Score per user request */}
                       </div>
 
                       {/* Genre chips */}

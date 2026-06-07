@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from '../api/axios';
 import MovieRow from '../components/MovieRow';
+import MovieDetailModal from '../components/MovieDetailModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Film, ChevronLeft, ChevronRight, Loader2, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { fixTitle, getPosterUrl } from '../utils/formatTitle';
@@ -23,6 +24,8 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack }) 
   const [page, setPage]           = useState(1);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
+  const [selectedMovie, setSelectedMovie] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const genreLabel = GENRE_LABELS[genre?.key] || genre?.label || genre?.key || 'Unknown';
   const isValidGenre = genre?.key && genre.key in GENRE_LABELS;
@@ -43,6 +46,19 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack }) 
   useEffect(() => {
     setPage(1);
   }, [genre?.key]);
+
+  const openDetail = async (movie) => {
+    setSelectedMovie(movie);
+    setDetailLoading(true);
+    try {
+      const res = await axios.get(`/movies/${movie.movie_id}`);
+      setSelectedMovie(res.data);
+    } catch {
+      // fallback
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const fetchGenreMovies = async () => {
     setLoading(true);
@@ -135,6 +151,7 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack }) 
                     movie={movie}
                     onRate={onRate}
                     savedRating={savedRatings[movie.movie_id]}
+                    onClick={() => openDetail(movie)}
                   />
                 ))}
               </div>
@@ -192,13 +209,21 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack }) 
           )}
         </motion.div>
       </AnimatePresence>
+
+      {/* ── Movie Detail Modal ──────────────────────────────── */}
+      {selectedMovie && (
+        <MovieDetailModal
+          movie={selectedMovie}
+          onClose={() => setSelectedMovie(null)}
+        />
+      )}
     </div>
   );
 }
 
 
 // ── Movie Card (grid layout) ──────────────────────────────
-function MovieCard({ movie, onRate, savedRating }) {
+function MovieCard({ movie, onRate, savedRating, onClick }) {
   const [hoverStar, setHoverStar] = useState(0);
   const [localRating, setLocalRating] = useState(0);
   const displayStars = hoverStar || localRating || savedRating || 0;
@@ -211,6 +236,7 @@ function MovieCard({ movie, onRate, savedRating }) {
 
   return (
     <motion.div
+      onClick={onClick}
       whileHover={{ scale: 1.03, y: -4 }}
       className="group relative bg-zinc-900/60 rounded-xl overflow-hidden border border-white/5
                  hover:border-white/15 transition-all cursor-pointer"

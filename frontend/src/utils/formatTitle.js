@@ -50,6 +50,28 @@ export function getPosterUrl(movie) {
     if (movie.poster_url.startsWith('http')) return movie.poster_url;
     return `${BACKEND_URL}${movie.poster_url}`;
   }
-  const encoded = encodeURIComponent(fixTitle(movie?.title || 'Movie'));
-  return `https://placehold.co/300x450/1a1a2e/8888aa?text=${encoded}`;
+  
+  // Use inline SVG for offline reliability
+  const title = fixTitle(movie?.title || 'Movie');
+  const shortTitle = title.length > 25 ? title.substring(0, 22) + '...' : title;
+  
+  // Create an SVG data URI
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450">
+    <rect width="300" height="450" fill="#1a1a2e" />
+    <rect width="300" height="450" fill="url(#grad)" />
+    <defs>
+      <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:#2a2a4e;stop-opacity:1" />
+        <stop offset="100%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      </linearGradient>
+    </defs>
+    <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#8888aa" font-family="sans-serif" font-size="18" font-weight="bold" padding="20">
+      ${shortTitle}
+    </text>
+    <text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" fill="#555577" font-family="sans-serif" font-size="14">
+      No Poster
+    </text>
+  </svg>`;
+  
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
