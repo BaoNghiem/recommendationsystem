@@ -39,7 +39,7 @@ export function splitTitle(raw) {
 
 /**
  * getPosterUrl — Trả về URL ảnh poster phim.
- * Ưu tiên poster_url thật từ DB, fallback về placeholder.
+ * Ưu tiên poster_url thật từ DB, fallback về SVG placeholder nội tuyến.
  *
  * @param {object} movie — object phim có thể chứa poster_url, title
  * @returns {string} — URL ảnh poster
@@ -47,10 +47,24 @@ export function splitTitle(raw) {
 const BACKEND_URL = 'http://localhost:8000';
 export function getPosterUrl(movie) {
   if (movie?.poster_url) {
-    // Nếu là URL tuyệt đối (http...) dùng luôn, còn lại ghép với backend
     if (movie.poster_url.startsWith('http')) return movie.poster_url;
     return `${BACKEND_URL}${movie.poster_url}`;
   }
-  const encoded = encodeURIComponent(fixTitle(movie?.title || 'Movie'));
-  return `https://placehold.co/300x450/1a1a2e/8888aa?text=${encoded}`;
+  // Fallback: SVG inline — không cần internet, luôn hiển thị được
+  const title = fixTitle(movie?.title || 'Movie');
+  const short = title.length > 22 ? title.substring(0, 20) + '…' : title;
+  const escaped = short.replace(/['"<>&]/g, c => ({ "'": '%27', '"': '%22', '<': '%3C', '>': '%3E', '&': '%26' }[c]));
+  const svg = [
+    "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='450'>",
+    "<defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'>",
+    "<stop offset='0%' style='stop-color:%231a1a2e'/>",
+    "<stop offset='100%' style='stop-color:%2316213e'/>",
+    "</linearGradient></defs>",
+    "<rect width='300' height='450' fill='url(%23g)'/>",
+    "<rect x='100' y='140' width='100' height='80' rx='8' fill='%232a2a4a'/>",
+    "<text x='150' y='195' font-family='Arial' font-size='36' fill='%234a4aaa' text-anchor='middle'>🎬</text>",
+    `<text x='150' y='250' font-family='Arial' font-size='12' fill='%237777aa' text-anchor='middle' font-weight='bold'>${escaped}</text>`,
+    "</svg>",
+  ].join('');
+  return 'data:image/svg+xml,' + svg;
 }
