@@ -12,7 +12,21 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
   const [hoverRating, setHoverRating] = useState({});
   const [localRatings, setLocalRatings] = useState({});
   const [selectedMovie, setSelectedMovie] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const abortRef = useRef(null);
+
+  const openDetail = async (movie) => {
+    setSelectedMovie(movie);
+    setDetailLoading(true);
+    try {
+      const res = await axios.get(`/movies/${movie.movie_id}`);
+      setSelectedMovie(res.data);
+    } catch {
+      // fallback to basic data
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   // ── Fetch search results when query changes ──
   useEffect(() => {
@@ -163,7 +177,7 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
                 variants={cardVariants}
                 whileHover={{ scale: 1.04, y: -6 }}
                 className="relative group cursor-pointer"
-                onClick={() => setSelectedMovie(movie)}
+                onClick={() => openDetail(movie)}
               >
                 {/* Card container */}
                 <div className="relative aspect-[2/3] rounded-xl overflow-hidden
