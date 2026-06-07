@@ -260,7 +260,7 @@ function MovieCard({ movie, onRate, savedRating, onClick }) {
       {/* Info */}
       <div className="p-3">
         <h3 className="text-white text-xs font-semibold line-clamp-2 mb-1.5 leading-tight">
-          {movie.title}
+          {fixTitle(movie.title)}
         </h3>
         <p className="text-gray-500 text-[10px] mb-2 line-clamp-1">
           {movie.genres_orig?.split('|').join(' · ')}
