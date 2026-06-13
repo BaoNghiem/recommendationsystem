@@ -4,22 +4,22 @@ import {
   User, Mail, Shield, Calendar, Star, Film, Clock,
   ChevronLeft, ChevronRight, Loader2, LogOut, MailCheck, MailX,
   Trash2, Lock, Eye, EyeOff, X, AlertTriangle, CheckCircle, Compass,
-  Search
+  Search, Play
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { fixTitle, getPosterUrl } from '../utils/formatTitle';
 
-export default function Profile() {
+export default function Profile({ onWatch }) {
   return (
     <ProtectedRoute>
-      <ProfileInner />
+      <ProfileInner onWatch={onWatch} />
     </ProtectedRoute>
   );
 }
 
-function ProfileInner() {
+function ProfileInner({ onWatch }) {
   const { user, logout } = useAuth();
   const [ratings, setRatings] = useState([]);
   const [totalRatings, setTotalRatings] = useState(0);
@@ -30,6 +30,11 @@ function ProfileInner() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 10;
+
+  // Watch history state
+  const [watchHistory, setWatchHistory] = useState([]);
+  const [totalHistory, setTotalHistory] = useState(0);
+  const [loadingHistory, setLoadingHistory] = useState(true);
 
   // Stats
   const avgRating = ratings.length > 0
@@ -54,7 +59,25 @@ function ProfileInner() {
   useEffect(() => {
     fetchRatings();
     fetchProfile();
-  }, []);
+    fetchWatchHistory();
+  // Phu thuoc vao user.user_id: tu dong re-fetch khi user doi tai khoan
+  // Tranh hien thi lich su xem sai cua tai khoan cu
+  }, [user?.user_id]);
+
+  const fetchWatchHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await api.get('/watch/history?page=1&page_size=20');
+      setWatchHistory(res.data.history || []);
+      // BUG FIX: 'total' tu API dem so episodes (taps), khong phai so phim
+      // Hien thi so phim rieng biet thay vi tong so entries
+      const history = res.data.history || [];
+      setTotalHistory(history.length);
+    } catch (err) {
+      console.error('[Profile] Watch history error:', err.message);
+    }
+    setLoadingHistory(false);
+  };
 
   const fetchProfile = async () => {
     try {
@@ -240,6 +263,61 @@ function ProfileInner() {
             </div>
           </div>
         )}
+
+        {/* ── Watch History ─────────────────────────────── */}
+        <div className="bg-zinc-900/60 border border-white/5 rounded-xl overflow-hidden mb-8">
+          <div className="px-5 py-4 border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <Play size={16} className="text-amber-500" />
+              <h3 className="font-semibold text-white">Phim da xem gan day</h3>
+              <span className="text-xs text-gray-500">({totalHistory} phim)</span>
+            </div>
+          </div>
+          
+          {loadingHistory ? (
+            <div className="p-5 flex justify-center"><Loader2 className="animate-spin text-gray-500" size={24} /></div>
+          ) : watchHistory.length === 0 ? (
+            <div className="p-8 text-center text-gray-500 text-sm">Ban chua xem bo phim nao.</div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 p-5">
+              {watchHistory.map((item, i) => (
+                <div 
+                  key={`${item.movie_id}-${item.episode_no || 'single'}`} 
+                  className="group relative cursor-pointer"
+                  onClick={() => onWatch?.(item)}
+                >
+                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden border border-white/10 bg-zinc-800">
+                    <img 
+                      src={getPosterUrl(item)} 
+                      alt={item.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Play size={32} className="text-white/80" />
+                    </div>
+                    {/* Progress bar overlay */}
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+                      <div 
+                        className={`h-full ${item.is_completed ? 'bg-green-500' : 'bg-red-500'}`} 
+                        style={{ width: `${item.watch_percent}%` }} 
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-xs font-semibold text-white truncate" title={item.title}>
+                      {fixTitle(item.title)}
+                    </p>
+                    {item.is_completed && (
+                      <p className="text-[10px] text-green-500 mt-0.5 flex items-center gap-1">
+                        <CheckCircle size={10} /> Đã xem xong
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* ── Rating History ─────────────────────────────── */}
         <div className="bg-zinc-900/60 border border-white/5 rounded-xl overflow-hidden">

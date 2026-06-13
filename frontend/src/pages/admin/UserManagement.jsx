@@ -150,7 +150,7 @@ function UserManagementInner() {
               <Users size={22} />
             </div>
             <div>
-              <h1 className="text-xl font-bold">Quản lý Người dùng</h1>
+              <h1 className="text-xl font-bold">Quản lý Tài khoản</h1>
               <p className="text-xs text-gray-500">
                 {total.toLocaleString()} tài khoản · Đang xem: {filterLabel}
               </p>
@@ -231,7 +231,7 @@ function UserManagementInner() {
           ) : users.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-500">
               <Users size={40} className="mb-3 opacity-30" />
-              <p>Không tìm thấy người dùng nào.</p>
+              <p>Không tìm thấy tài khoản nào.</p>
             </div>
           ) : (
             <div className="divide-y divide-white/5">

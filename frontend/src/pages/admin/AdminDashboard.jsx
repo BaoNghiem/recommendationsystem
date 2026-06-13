@@ -5,6 +5,7 @@ import {
   BarChart3, Users, Film, Star, TrendingUp, RefreshCw, Database,
   ArrowLeft
 } from 'lucide-react';
+import { fixTitle } from '../../utils/formatTitle';
 
 export default function AdminDashboard({ onBack }) {
   const { user } = useAuth();
@@ -270,7 +271,7 @@ export default function AdminDashboard({ onBack }) {
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       maxWidth: '70%'
                     }}>
-                      {i + 1}. {movie.title}
+                      {i + 1}. {fixTitle(movie.title)}
                     </span>
                     <span style={{ color: '#a1a1aa', fontSize: 12, fontWeight: 700 }}>
                       {movie.count?.toLocaleString()} ratings

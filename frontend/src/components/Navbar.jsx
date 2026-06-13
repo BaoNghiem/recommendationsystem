@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, Bell, User, LogOut, ShieldCheck, Home, Database, Users, X, ChevronDown, Film,
   Swords, Mountain, Clapperboard, Baby, Laugh, Fingerprint, BookOpen, Drama, Sparkles,
   Moon, Skull, Music, HelpCircle, Heart, Atom, Crosshair, Shield, Wheat, UserCircle,
-  Loader2, BarChart3, UserCircle2
+  Loader2, BarChart3, UserCircle2, Globe
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import axios from '../api/axios';
@@ -30,12 +30,16 @@ const GENRE_ITEMS = [
   { key: "western",     label: "Western",     icon: Wheat },
 ];
 
-const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGenreSelect }) => {
+const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGenreSelect, onCountrySelect }) => {
   const { user, isLoggedIn, isAdmin, logout } = useAuth();
   const [isScrolled, setIsScrolled]   = useState(false);
   const [showMenu, setShowMenu]       = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showGenre, setShowGenre]     = useState(false);
+  
+  // ── Country states ──
+  const [countries, setCountries]         = useState([]);
+  const [showCountry, setShowCountry]     = useState(false);
 
   // ── Dropdown suggestion states ──
   const [suggestions, setSuggestions]       = useState([]);
@@ -44,6 +48,8 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
 
   const genreTimeout  = useRef(null);
   const genreRef      = useRef(null);
+  const countryTimeout= useRef(null);
+  const countryRef    = useRef(null);
   const searchTimeout = useRef(null);
   const searchRef     = useRef(null);
   const suggestAbort  = useRef(null);
@@ -60,6 +66,9 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
       if (genreRef.current && !genreRef.current.contains(e.target)) {
         setShowGenre(false);
       }
+      if (countryRef.current && !countryRef.current.contains(e.target)) {
+        setShowCountry(false);
+      }
       if (searchRef.current && !searchRef.current.contains(e.target)) {
         setShowSuggestions(false);
       }
@@ -73,6 +82,7 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
     return () => {
       clearTimeout(searchTimeout.current);
       clearTimeout(genreTimeout.current);
+      clearTimeout(countryTimeout.current);
       if (suggestAbort.current) suggestAbort.current.abort();
     };
   }, []);
@@ -80,10 +90,26 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
   const handleGenreEnter = () => {
     clearTimeout(genreTimeout.current);
     setShowGenre(true);
+    setShowCountry(false);
   };
   const handleGenreLeave = () => {
     genreTimeout.current = setTimeout(() => setShowGenre(false), 200);
   };
+
+  const handleCountryEnter = () => {
+    clearTimeout(countryTimeout.current);
+    setShowCountry(true);
+    setShowGenre(false);
+  };
+  const handleCountryLeave = () => {
+    countryTimeout.current = setTimeout(() => setShowCountry(false), 200);
+  };
+
+  useEffect(() => {
+    axios.get('/movies/countries')
+      .then(res => setCountries(res.data.countries || []))
+      .catch(err => console.error('[Navbar Countries]', err.message));
+  }, []);
 
   // ── Fetch live suggestions (debounced 300ms) ──
   const fetchSuggestions = (value) => {
@@ -150,12 +176,14 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
   };
 
   // ── Click a suggestion item → navigate to SearchPage ──
+  // BUG FIX: Dong bo query gui di voi text hien thi — ca hai dung fixTitle()
   const handleSuggestionClick = (movie) => {
-    setSearchQuery(movie.title);
+    const displayTitle = fixTitle(movie.title);
+    setSearchQuery(displayTitle);
     setShowSuggestions(false);
     clearTimeout(searchTimeout.current);
     if (suggestAbort.current) suggestAbort.current.abort();
-    onSearch?.(movie.title);
+    onSearch?.(displayTitle);
     onNavigate?.('search');
   };
 
@@ -178,6 +206,12 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
   const handleGenreClick = (genre) => {
     setShowGenre(false);
     onGenreSelect?.(genre);
+  };
+
+  const handleCountryClick = (country) => {
+    setShowCountry(false);
+    onNavigate?.('country'); // handled in App
+    // Wait, let's pass it via App props
   };
 
   const navLink = (page, label, icon) => {
@@ -277,10 +311,60 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
             </div>
           </li>
 
-          {isAdmin && navLink('dashboard', 'Dashboard', <BarChart3 size={14} />)}
-          {isAdmin && navLink('admin', 'Quan ly phim', <Database size={14} />)}
-          {isAdmin && navLink('people', 'Dien vien', <UserCircle2 size={14} />)}
-          {isAdmin && navLink('users', 'Quan ly nguoi dung', <Users size={14} />)}
+          {/* ━━━ COUNTRY DROPDOWN ━━━ */}
+          <li
+            ref={countryRef}
+            className="relative"
+            onMouseEnter={handleCountryEnter}
+            onMouseLeave={handleCountryLeave}
+          >
+            <button
+              className={`flex items-center gap-1 text-sm cursor-pointer transition
+                ${currentPage === 'country' ? 'text-white font-bold' : 'text-gray-400 hover:text-white'}`}
+            >
+              <Globe size={14} />
+              Quoc gia
+              <ChevronDown size={12} className={`transition-transform duration-200 ${showCountry ? 'rotate-180' : ''}`} />
+            </button>
+
+            <div
+              className={`absolute left-0 top-full mt-3 w-[400px]
+                         bg-zinc-900/80 backdrop-blur-xl
+                         border border-white/10 rounded-2xl
+                         shadow-2xl shadow-black/60
+                         overflow-hidden z-[200]
+                         transition-all duration-300 ease-out origin-top
+                         ${showCountry
+                           ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto'
+                           : 'opacity-0 scale-95 -translate-y-2 pointer-events-none'}`}
+              onMouseEnter={handleCountryEnter}
+              onMouseLeave={handleCountryLeave}
+            >
+              <div className="h-0.5 w-full bg-gradient-to-r from-blue-600 via-cyan-500 to-teal-500" />
+              <div className="p-5 max-h-[400px] overflow-y-auto custom-scrollbar">
+                <div className="flex items-center gap-2 mb-4">
+                  <Globe size={16} className="text-blue-400" />
+                  <span className="text-sm font-semibold text-white">Kham pha theo quoc gia</span>
+                  <span className="text-xs text-gray-500 ml-auto">{countries.length} quoc gia</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  {countries.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => { setShowCountry(false); onCountrySelect?.(c); }}
+                      className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl
+                                 text-gray-300 text-sm
+                                 hover:bg-white/10 hover:text-white
+                                 transition-all duration-150 group text-left"
+                    >
+                      <span className="truncate">{c}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </li>
         </ul>
       </div>
 
@@ -455,7 +539,7 @@ const Navbar = ({ onOpenLogin, currentPage = 'home', onNavigate, onSearch, onGen
                                  hover:bg-violet-500/10 transition border-b border-white/5"
                     >
                       <Users size={15} />
-                      Quan ly nguoi dung
+                      Quan ly tai khoan
                     </button>
                   </>
                 )}

@@ -60,7 +60,6 @@ class MovieDetailSchema(MovieSchema):
 
 # ── Rating ─────────────────────────────────────────────────────
 class RateRequest(BaseModel):
-    """Schema cho POST /rate endpoint."""
-    user_id: int = 0  # Deprecated: se lay tu JWT, giu lai de khong break frontend
+    """Schema cho POST /rate endpoint. user_id lay tu JWT, khong nhan tu client."""
     movie_id: int
     rating: float = Field(..., ge=0.5, le=5.0, description="Rating from 0.5 to 5.0")

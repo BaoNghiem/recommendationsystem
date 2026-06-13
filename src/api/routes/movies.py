@@ -106,36 +106,87 @@ async def search_movies(
     try:
         cur = conn.cursor()
         pattern = f"%{q}%"
+        # BUG FIX: Dung subquery de tinh avg_rating/vote_count truoc khi JOIN cast
+        # Tranh cartesian join giua ratings x directors x actors gay nhân boi vote_count
         cur.execute("""
-            SELECT DISTINCT m.movie_id, m.title, m.genres_orig,
+            SELECT m.movie_id, m.title, m.genres_orig,
                    m.release_year, m.country, m.total_episodes, m.description, m.poster_url,
-                   COALESCE(ROUND(AVG(r.rating)::numeric, 1), 0) AS avg_rating,
-                   COUNT(r.rating) AS vote_count
+                   COALESCE(rs.avg_rating, 0) AS avg_rating,
+                   COALESCE(rs.vote_count, 0) AS vote_count
             FROM movies m
-            LEFT JOIN ratings r      ON m.movie_id  = r.movie_id
-            LEFT JOIN movie_directors md ON m.movie_id = md.movie_id
-            LEFT JOIN directors d    ON md.director_id = d.director_id
-            LEFT JOIN movie_actors ma ON m.movie_id   = ma.movie_id
-            LEFT JOIN actors a       ON ma.actor_id    = a.actor_id
-            WHERE m.title  ILIKE %s
-               OR d.name   ILIKE %s
-               OR a.name   ILIKE %s
-            GROUP BY m.movie_id, m.title, m.genres_orig,
-                     m.release_year, m.country, m.total_episodes, m.description, m.poster_url
+            LEFT JOIN (
+                SELECT movie_id,
+                       ROUND(AVG(rating)::numeric, 1) AS avg_rating,
+                       COUNT(*) AS vote_count
+                FROM ratings
+                GROUP BY movie_id
+            ) rs ON m.movie_id = rs.movie_id
+            WHERE m.movie_id IN (
+                SELECT DISTINCT m2.movie_id
+                FROM movies m2
+                LEFT JOIN movie_directors md ON m2.movie_id = md.movie_id
+                LEFT JOIN directors d        ON md.director_id = d.director_id
+                LEFT JOIN movie_actors ma    ON m2.movie_id = ma.movie_id
+                LEFT JOIN actors a           ON ma.actor_id = a.actor_id
+                WHERE m2.title ILIKE %s
+                   OR d.name   ILIKE %s
+                   OR a.name   ILIKE %s
+            )
             ORDER BY vote_count DESC, m.title
             LIMIT %s
         """, (pattern, pattern, pattern, limit))
         rows = cur.fetchall()
-        cur.close()
-        # Them cast (directors) vao ket qua tim kiem
+        if not rows:
+            cur.close()
+            return []
+
+        movie_ids = [r[0] for r in rows]
+
+        # Issue 14 FIX: Batch query lay TOAN BO cast cua tat ca phim trong 1 lan
+        # Thay vi N*2 queries (moi phim 2 queries), dung 2 queries cho tat ca phim
+        placeholders = ','.join(['%s'] * len(movie_ids))
+
+        cur.execute(f"""
+            SELECT md.movie_id, d.director_id, d.name, d.birth_year, d.nationality
+            FROM directors d
+            JOIN movie_directors md ON d.director_id = md.director_id
+            WHERE md.movie_id IN ({placeholders})
+            ORDER BY d.name
+        """, movie_ids)
+        all_directors: dict[int, list] = {}
+        for row in cur.fetchall():
+            mid = row[0]
+            all_directors.setdefault(mid, []).append(
+                {"director_id": row[1], "name": row[2], "birth_year": row[3], "nationality": row[4]}
+            )
+
+        cur.execute(f"""
+            SELECT ma.movie_id, a.actor_id, a.name, a.birth_year, a.nationality,
+                   ma.character_name, ma.billing_order
+            FROM actors a
+            JOIN movie_actors ma ON a.actor_id = ma.actor_id
+            WHERE ma.movie_id IN ({placeholders})
+            ORDER BY ma.billing_order, a.name
+        """, movie_ids)
+        all_actors: dict[int, list] = {}
+        for row in cur.fetchall():
+            mid = row[0]
+            all_actors.setdefault(mid, []).append(
+                {"actor_id": row[1], "name": row[2], "birth_year": row[3],
+                 "nationality": row[4], "character_name": row[5], "billing_order": row[6]}
+            )
+
         results = []
         for r in rows:
-            item = {
+            mid = r[0]
+            results.append({
                 **_row_to_movie(r[:8]),
                 "avg_rating": float(r[8]),
                 "vote_count":  r[9],
-            }
-            results.append(item)
+                "directors":   all_directors.get(mid, []),
+                "actors":      all_actors.get(mid, []),
+            })
+        cur.close()
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -183,9 +234,10 @@ async def get_genres():
 # ── GET /movies/by-genre ──────────────────────────────────────
 @router.get("/by-genre")
 async def get_movies_by_genre(
-    genre: str = Query(...),
-    limit: int = Query(30, ge=1, le=100),
-    page:  int = Query(1, ge=1),
+    genre:  str  = Query(...),
+    limit:  int  = Query(30, ge=1, le=100),
+    page:   int  = Query(1, ge=1),
+    random: bool = Query(False, description="True = lay ngau nhien thay vi sort theo do pho bien"),
 ):
     if genre not in GENRE_MAP:
         raise HTTPException(400, f"Genre '{genre}' khong hop le.")
@@ -203,19 +255,36 @@ async def get_movies_by_genre(
         """)
         total = cur.fetchone()[0]
 
-        cur.execute(f"""
-            SELECT m.movie_id, m.title, m.genres_orig,
-                   m.release_year, m.country, m.total_episodes, m.description, m.poster_url,
-                   COALESCE(rc.cnt, 0) AS rating_count
-            FROM movies m
-            JOIN movie_genres mg ON m.movie_id = mg.movie_id
-            LEFT JOIN (
-                SELECT movie_id, COUNT(*) AS cnt FROM ratings GROUP BY movie_id
-            ) rc ON m.movie_id = rc.movie_id
-            WHERE mg.{genre} = 1
-            ORDER BY rating_count DESC, m.title
-            LIMIT %s OFFSET %s
-        """, (limit, offset))
+        if random:
+            # FEATURE: Random sampling — dung TABLESAMPLE hoac ORDER BY RANDOM()
+            # ORDER BY RANDOM() an toan hon voi dataset ~3883 phim
+            cur.execute(f"""
+                SELECT m.movie_id, m.title, m.genres_orig,
+                       m.release_year, m.country, m.total_episodes, m.description, m.poster_url,
+                       COALESCE(rc.cnt, 0) AS rating_count
+                FROM movies m
+                JOIN movie_genres mg ON m.movie_id = mg.movie_id
+                LEFT JOIN (
+                    SELECT movie_id, COUNT(*) AS cnt FROM ratings GROUP BY movie_id
+                ) rc ON m.movie_id = rc.movie_id
+                WHERE mg.{genre} = 1
+                ORDER BY RANDOM()
+                LIMIT %s
+            """, (limit,))
+        else:
+            cur.execute(f"""
+                SELECT m.movie_id, m.title, m.genres_orig,
+                       m.release_year, m.country, m.total_episodes, m.description, m.poster_url,
+                       COALESCE(rc.cnt, 0) AS rating_count
+                FROM movies m
+                JOIN movie_genres mg ON m.movie_id = mg.movie_id
+                LEFT JOIN (
+                    SELECT movie_id, COUNT(*) AS cnt FROM ratings GROUP BY movie_id
+                ) rc ON m.movie_id = rc.movie_id
+                WHERE mg.{genre} = 1
+                ORDER BY rating_count DESC, m.title
+                LIMIT %s OFFSET %s
+            """, (limit, offset))
         rows = cur.fetchall()
         return {
             "genre":       genre,
@@ -229,6 +298,71 @@ async def get_movies_by_genre(
     finally:
         cur.close(); conn.close()
 
+
+# ── GET /movies/countries ──────────────────────────────────────
+@router.get("/countries")
+async def get_countries():
+    conn = DatabaseConnector.get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Cannot connect to Database.")
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT country FROM movies 
+            WHERE country IS NOT NULL AND country != '' 
+            ORDER BY country
+        """)
+        rows = cur.fetchall()
+        return {"countries": [r[0] for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+# ── GET /movies/by-country ─────────────────────────────────────
+@router.get("/by-country")
+async def get_movies_by_country(
+    country: str = Query(...),
+    limit: int = Query(30, ge=1, le=100),
+    page:  int = Query(1, ge=1),
+):
+    offset = (page - 1) * limit
+    conn = DatabaseConnector.get_connection()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Cannot connect to Database.")
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM movies
+            WHERE country ILIKE %s
+        """, (f"%{country}%",))
+        total = cur.fetchone()[0]
+
+        cur.execute("""
+            SELECT m.movie_id, m.title, m.genres_orig,
+                   m.release_year, m.country, m.total_episodes, m.description, m.poster_url,
+                   COALESCE(rc.cnt, 0) AS rating_count
+            FROM movies m
+            LEFT JOIN (
+                SELECT movie_id, COUNT(*) AS cnt FROM ratings GROUP BY movie_id
+            ) rc ON m.movie_id = rc.movie_id
+            WHERE m.country ILIKE %s
+            ORDER BY rating_count DESC, m.title
+            LIMIT %s OFFSET %s
+        """, (f"%{country}%", limit, offset))
+        rows = cur.fetchall()
+        return {
+            "country":     country,
+            "total":       total,
+            "page":        page,
+            "movies": [{**_row_to_movie(r[:8]), "rating_count": r[8]} for r in rows],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close(); conn.close()
 
 # ── GET /movies/{movie_id} ─────────────────────────────────────
 @router.get("/{movie_id}", response_model=MovieDetailSchema)

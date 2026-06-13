@@ -1,24 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from '../api/axios';
-import MovieRow from '../components/MovieRow';
 import MovieDetailModal from '../components/MovieDetailModal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Film, ChevronLeft, ChevronRight, Loader2, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Film, ChevronLeft, ChevronRight, Loader2, AlertTriangle, ArrowLeft, Globe } from 'lucide-react';
 import { fixTitle, getPosterUrl } from '../utils/formatTitle';
-
-// Mapping genre key -> display label (phai dong bo voi Backend)
-const GENRE_LABELS = {
-  action: "Action", adventure: "Adventure", animation: "Animation",
-  childrens: "Children's", comedy: "Comedy", crime: "Crime",
-  documentary: "Documentary", drama: "Drama", fantasy: "Fantasy",
-  film_noir: "Film-Noir", horror: "Horror", musical: "Musical",
-  mystery: "Mystery", romance: "Romance", sci_fi: "Sci-Fi",
-  thriller: "Thriller", war: "War", western: "Western",
-};
 
 const MOVIES_PER_PAGE = 30;
 
-export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, onWatch }) {
+export default function CountryPage({ country, onRate, savedRatings = {}, onBack, onWatch }) {
   const [movies, setMovies]       = useState([]);
   const [total, setTotal]         = useState(0);
   const [page, setPage]           = useState(1);
@@ -27,25 +16,23 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const genreLabel = GENRE_LABELS[genre?.key] || genre?.label || genre?.key || 'Unknown';
-  const isValidGenre = genre?.key && genre.key in GENRE_LABELS;
   const totalPages = Math.ceil(total / MOVIES_PER_PAGE);
 
-  // Fetch khi genre hoac page thay doi
+  // Fetch khi country hoac page thay doi
   useEffect(() => {
-    if (!isValidGenre) {
-      setError(`The loai "${genre?.key}" khong ton tai.`);
+    if (!country) {
+      setError(`Quốc gia không hợp lệ.`);
       setLoading(false);
       return;
     }
 
-    fetchGenreMovies();
-  }, [genre?.key, page]);
+    fetchCountryMovies();
+  }, [country, page]);
 
-  // Reset page khi doi genre
+  // Reset page khi doi country
   useEffect(() => {
     setPage(1);
-  }, [genre?.key]);
+  }, [country]);
 
   const openDetail = async (movie) => {
     setSelectedMovie(movie);
@@ -60,20 +47,16 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
     }
   };
 
-  const fetchGenreMovies = async () => {
+  const fetchCountryMovies = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await axios.get(`/movies/by-genre?genre=${genre.key}&limit=${MOVIES_PER_PAGE}&page=${page}`);
+      const res = await axios.get(`/movies/by-country?country=${encodeURIComponent(country)}&limit=${MOVIES_PER_PAGE}&page=${page}`);
       setMovies(res.data.movies || []);
       setTotal(res.data.total || 0);
     } catch (err) {
-      console.error('[ERR] GenrePage:', err.message);
-      if (err.response?.status === 400) {
-        setError(`The loai "${genre.key}" khong hop le.`);
-      } else {
-        setError('Khong the tai danh sach phim. Vui long thu lai.');
-      }
+      console.error('[ERR] CountryPage:', err.message);
+      setError('Khong the tai danh sach phim. Vui long thu lai.');
     }
     setLoading(false);
   };
@@ -84,7 +67,7 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
       <div className="min-h-[60vh] flex flex-col items-center justify-center px-4">
         <div className="bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-2xl p-10 text-center max-w-md">
           <AlertTriangle size={48} className="text-amber-400 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white mb-2">Loi</h2>
+          <h2 className="text-xl font-bold text-white mb-2">Lỗi</h2>
           <p className="text-gray-400 mb-6">{error}</p>
           <button
             onClick={() => onBack?.()}
@@ -111,9 +94,9 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
           >
             <ArrowLeft size={20} />
           </button>
-          <Film size={22} className="text-red-400" />
+          <Globe size={22} className="text-blue-400" />
           <h1 className="text-2xl lg:text-3xl font-bold text-white">
-            Phim {genreLabel}
+            Phim {country}
           </h1>
         </div>
         <p className="text-gray-400 text-sm ml-10">
@@ -125,7 +108,7 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
       {/* ── Movie Grid ── */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={`${genre?.key}-${page}`}
+          key={`${country}-${page}`}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -20 }}
@@ -135,15 +118,15 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
           {loading ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 size={32} className="animate-spin text-red-500" />
-              <span className="ml-3 text-gray-400">Dang tai phim {genreLabel}...</span>
+              <span className="ml-3 text-gray-400">Dang tai phim {country}...</span>
             </div>
           ) : movies.length === 0 ? (
             <div className="text-center py-20 text-gray-500">
-              Khong co phim nao trong the loai nay.
+              Khong co phim nao cua quốc gia nay.
             </div>
           ) : (
             <>
-              {/* Grid Layout (khong phai horizontal scroll) */}
+              {/* Grid Layout */}
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {movies.map((movie) => (
                   <MovieCard
@@ -171,7 +154,6 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
                     Truoc
                   </button>
 
-                  {/* Page numbers */}
                   <div className="flex items-center gap-1">
                     {generatePageNumbers(page, totalPages).map((p, i) => (
                       p === '...' ? (
@@ -222,7 +204,6 @@ export default function GenrePage({ genre, onRate, savedRatings = {}, onBack, on
   );
 }
 
-
 // ── Movie Card (grid layout) ──────────────────────────────
 function MovieCard({ movie, onRate, savedRating, onClick }) {
   const [hoverStar, setHoverStar] = useState(0);
@@ -242,7 +223,6 @@ function MovieCard({ movie, onRate, savedRating, onClick }) {
       className="group relative bg-zinc-900/60 rounded-xl overflow-hidden border border-white/5
                  hover:border-white/15 transition-all cursor-pointer"
     >
-      {/* Poster */}
       <div className="aspect-[2/3] relative overflow-hidden">
         <img
           src={getPosterUrl(movie)}
@@ -250,7 +230,6 @@ function MovieCard({ movie, onRate, savedRating, onClick }) {
           loading="lazy"
           className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-300"
         />
-        {/* Rating badge */}
         {movie.rating_count > 0 && (
           <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm rounded-md px-1.5 py-0.5 text-[10px] text-gray-300">
             {movie.rating_count} votes
@@ -258,7 +237,6 @@ function MovieCard({ movie, onRate, savedRating, onClick }) {
         )}
       </div>
 
-      {/* Info */}
       <div className="p-3">
         <h3 className="text-white text-xs font-semibold line-clamp-2 mb-1.5 leading-tight">
           {fixTitle(movie.title)}
@@ -267,7 +245,6 @@ function MovieCard({ movie, onRate, savedRating, onClick }) {
           {movie.genres_orig?.split('|').join(' · ')}
         </p>
 
-        {/* Star Rating */}
         <div className="flex items-center gap-0.5">
           {[1, 2, 3, 4, 5].map((star) => {
             const active = star <= displayStars;
@@ -301,8 +278,6 @@ function MovieCard({ movie, onRate, savedRating, onClick }) {
   );
 }
 
-
-// ── Utility: Generate page number array with ellipsis ──────
 function generatePageNumbers(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
 

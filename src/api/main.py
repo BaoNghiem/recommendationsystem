@@ -48,6 +48,9 @@ logging.basicConfig(
 logger = logging.getLogger("movieai")
 
 # ── App ────────────────────────────────────────────────────
+# 2.5 GB — phai dat truoc khi them middleware
+MAX_UPLOAD_BYTES = int(2.5 * 1024 * 1024 * 1024)
+
 app = FastAPI(
     title="Movie Recommender API",
     description="Hybrid AI Movie Recommendation System",
@@ -79,6 +82,7 @@ from src.api.routes.admin_movies   import router as admin_movies_router
 from src.api.routes.admin_users    import router as admin_users_router
 from src.api.routes.admin_people   import router as admin_people_router
 from src.api.routes.ratings        import router as ratings_router
+from src.api.routes.videos         import admin_video_router, video_router, watch_router
 
 # Inject engine into recommendations router
 from src.api.routes.recommendations import set_engine as set_rec_engine
@@ -96,11 +100,15 @@ app.include_router(admin_movies_router)   # /admin/movies/*
 app.include_router(admin_users_router)    # /admin/stats, /admin/users/*
 app.include_router(admin_people_router)   # /admin/directors/*, /admin/actors/*, /admin/movies/{id}/cast
 app.include_router(ratings_router)        # /ratings/me
+app.include_router(admin_video_router)    # /admin/movies/{id}/video
+app.include_router(video_router)          # /videos/{id}/info, /videos/{id}/stream
+app.include_router(watch_router)          # /watch/progress, /watch/history, /watch/continue
 
-# ── Serve uploaded poster images ──────────────────────────
+# ── Serve uploaded files (posters + videos) ───────────────
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 (UPLOADS_DIR / "posters").mkdir(exist_ok=True)
+(UPLOADS_DIR / "videos").mkdir(exist_ok=True)
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 logger.info("=" * 60)
@@ -110,12 +118,14 @@ logger.info("     /movies/*          (Movies: list, search+cast, detail+cast)")
 logger.info("     /recommend/*       (AI Recommendations)")
 logger.info("     /trending, /popular, /rate, /user-ratings")
 logger.info("     /admin/stats       (Admin: system stats)")
-logger.info("     /admin/movies/*    (Admin: Movie CRUD + Cast)")
+logger.info("     /admin/movies/*    (Admin: Movie CRUD + Cast + Video)")
 logger.info("     /admin/directors/* (Admin: Director CRUD)")
 logger.info("     /admin/actors/*    (Admin: Actor CRUD)")
 logger.info("     /admin/users/*     (Admin: User CRUD)")
 logger.info("     /ratings/*         (User ratings history)")
-logger.info("     /api/uploads/*     (Static: poster images)")
+logger.info("     /videos/*          (Video info + streaming)")
+logger.info("     /watch/*           (Watch progress + history)")
+logger.info("     /api/uploads/*     (Static: posters + videos)")
 logger.info("=" * 60)
 
 
@@ -182,4 +192,10 @@ async def test_db():
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # h11_max_incomplete_event_size: gioi han multipart body (2.5 GB)
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=8000,
+        # Khong co gioi han body size o cap uvicorn — starlette tu xu ly
+    )

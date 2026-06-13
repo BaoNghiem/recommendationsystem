@@ -6,10 +6,12 @@ import MovieDetailModal from './MovieDetailModal';
 import api from '../api/axios';
 import { fixTitle, getPosterUrl } from '../utils/formatTitle';
 
-const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} }) => {
-  const [hoverRating, setHoverRating]   = useState({});
-  const [userRatings, setUserRatings]   = useState({});
-  const [detailMovie, setDetailMovie]   = useState(null);
+const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {}, onWatch }) => {
+  const [hoverRating, setHoverRating]     = useState({});
+  // Issue 10 FIX: Bo state userRatings noi bo, dung savedRatings lam source of truth
+  // Khi user click sao, onRate() cap nhat savedRatings o App (qua setSavedRatings)
+  // Tranh stale state khi danh sach phim thay doi (re-render voi movies moi)
+  const [detailMovie, setDetailMovie]     = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const scrollRef = useRef(null);
 
@@ -17,14 +19,12 @@ const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} 
   const handleRateClick = (e, movie, rating) => {
     e.preventDefault();
     e.stopPropagation();
-    setUserRatings(prev => ({ ...prev, [movie.movie_id]: rating }));
     if (onRate) onRate(movie.movie_id, movie.title, rating);
   };
 
-  // Thu tu uu tien: hover > click local > da luu DB > 0
+  // Thu tu uu tien: hover > da luu DB (savedRatings) > 0
   const getDisplayStars = (movieId) => {
     if (hoverRating[movieId]) return hoverRating[movieId];
-    if (userRatings[movieId]) return userRatings[movieId];
     if (savedRatings[movieId]) return savedRatings[movieId];
     return 0;
   };
@@ -100,11 +100,12 @@ const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} 
             ) : (
               movies && movies.map((movie) => {
                 const displayStars = getDisplayStars(movie.movie_id);
-                const hasRated = userRatings[movie.movie_id] > 0;
+                const hasRated = savedRatings[movie.movie_id] > 0;
 
                 return (
                   <motion.div
                     key={movie.movie_id}
+                    onClick={(e) => openDetail(e, movie)}
                     whileHover={{ scale: 1.08, zIndex: 50 }}
                     transition={{ type: 'spring', stiffness: 300, damping: 20 }}
                     className="relative flex-shrink-0 w-[150px] sm:w-[170px] lg:w-[200px] xl:w-[220px]
@@ -145,7 +146,7 @@ const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} 
                         })}
                         {hasRated && (
                           <span className="text-yellow-500 text-[10px] font-bold ml-1">
-                            {userRatings[movie.movie_id]}
+                            {savedRatings[movie.movie_id]}
                           </span>
                         )}
                       </div>
@@ -156,16 +157,7 @@ const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} 
                                     opacity-0 group-hover/card:opacity-100 transition-opacity duration-200
                                     rounded-xl border border-white/15 z-40">
                       <div className="flex items-center gap-2 mb-3">
-                        {/* Info button → mở Detail Modal */}
-                        <button
-                          onClick={(e) => openDetail(e, movie)}
-                          className="w-9 h-9 rounded-full bg-white/10 border border-white/20
-                                     flex items-center justify-center hover:bg-white/20 transition"
-                          title="Xem chi tiết phim"
-                        >
-                          <Info size={16} className="text-white" />
-                        </button>
-
+                        {/* Removed Info button per user request */}
                         {/* Removed AI Match Score per user request */}
                       </div>
 
@@ -209,11 +201,12 @@ const MovieRow = ({ title, movies, isLoading, onRate, reason, savedRatings = {} 
         </div>
       </div>
 
-      {/* ── Movie Detail Modal ──────────────────────────────── */}
+      {/* ── Movie Detail Modal ────────────────────────────────────────── */}
       {detailMovie && (
         <MovieDetailModal
           movie={detailMovie}
           onClose={() => setDetailMovie(null)}
+          onWatch={onWatch}
         />
       )}
     </>

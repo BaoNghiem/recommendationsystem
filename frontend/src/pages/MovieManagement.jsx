@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axios';
 import MovieFormModal from '../components/MovieFormModal';
 import MovieDetailModal from '../components/MovieDetailModal';
@@ -8,7 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Plus, Search, ChevronLeft, ChevronRight, Pencil, Trash2,
   Film, Loader2, AlertCircle, CheckCircle, Database, Eye,
-  Calendar, Globe, Tv2
+  Calendar, Globe, Tv2, Video, Upload, X, HardDrive
 } from 'lucide-react';
 
 // ── Main Page (wrapped in ProtectedRoute) ──────────────────────
@@ -42,6 +42,9 @@ function MovieManagementInner() {
   // Delete confirm
   const [deleteTarget, setDeleteTarget]   = useState(null);
   const [deleting, setDeleting]           = useState(false);
+
+  // Video upload
+  const [videoTarget, setVideoTarget]     = useState(null); // { movie_id, title, total_episodes }
 
   // Toast
   const [toast, setToast] = useState(null);
@@ -295,6 +298,13 @@ function MovieManagementInner() {
                       <Pencil size={14} />
                     </button>
                     <button
+                      onClick={(e) => { e.stopPropagation(); setVideoTarget(m); }}
+                      className="p-2 rounded-lg hover:bg-green-500/10 text-green-400 transition"
+                      title="Upload Video"
+                    >
+                      <Video size={14} />
+                    </button>
+                    <button
                       onClick={(e) => { e.stopPropagation(); setDeleteTarget(m); }}
                       className="p-2 rounded-lg hover:bg-red-500/10 text-red-400 transition"
                       title="Xóa"
@@ -337,12 +347,23 @@ function MovieManagementInner() {
         </div>
       </div>
 
-      {/* ── Movie Detail Modal ────────────────────────────────── */}
+      {/* ── Movie Detail Modal ──────────────────────────────────── */}
       <AnimatePresence>
-        {detailMovie && !modalOpen && !deleteTarget && (
+        {detailMovie && !modalOpen && !deleteTarget && !videoTarget && (
           <MovieDetailModal
             movie={detailMovie}
             onClose={() => setDetailMovie(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── Video Upload Modal ────────────────────────────────── */}
+      <AnimatePresence>
+        {videoTarget && (
+          <VideoUploadModal
+            movie={videoTarget}
+            onClose={() => setVideoTarget(null)}
+            onSuccess={(msg) => { showToast(msg); setVideoTarget(null); }}
           />
         )}
       </AnimatePresence>
@@ -383,7 +404,7 @@ function MovieManagementInner() {
                 </div>
                 <h3 className="text-lg font-bold mb-1">Xác nhận xóa</h3>
                 <p className="text-sm text-gray-400 mb-1">Bạn có chắc muốn xóa phim:</p>
-                <p className="text-sm text-white font-semibold mb-1">"{deleteTarget.title}"</p>
+                <p className="text-sm text-white font-semibold mb-1">"{fixTitle(deleteTarget.title)}"</p>
                 <p className="text-xs text-gray-500 mb-5">
                   ID #{deleteTarget.movie_id} — Tất cả ratings liên quan cũng sẽ bị xóa.
                 </p>
@@ -426,5 +447,384 @@ function MovieManagementInner() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// VIDEO UPLOAD MODAL
+// ══════════════════════════════════════════════════════════════
+function VideoUploadModal({ movie, onClose, onSuccess }) {
+  const fileRef      = useRef(null);
+  const isSeries     = Boolean(movie?.total_episodes);
+
+  const [file,         setFile]         = useState(null);
+  const [episodeNo,    setEpisodeNo]    = useState('');
+  const [seasonNo,     setSeasonNo]     = useState('1');
+  const [episodeTitle, setEpisodeTitle] = useState('');
+  const [uploading,    setUploading]    = useState(false);
+  const [progress,     setProgress]     = useState(0);
+  const [existingVids, setExistingVids] = useState([]);
+  const [deleting,     setDeleting]     = useState(null);
+
+  const [editingEp,    setEditingEp]    = useState(null);
+  const [editForm,     setEditForm]     = useState({ episode_no: '', episode_title: '' });
+
+  // Fetch existing videos
+  useEffect(() => {
+    api.get(`/videos/${movie.movie_id}/info`)
+      .then(res => setExistingVids(res.data.episodes || []))
+      .catch(() => {});
+  }, [movie.movie_id]);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files?.[0];
+    if (f) setFile(f);
+  };
+
+  const handleUpload = async () => {
+    if (!file) return;
+    if (isSeries && !episodeNo) {
+      alert('Vui lòng nhập số tập.');
+      return;
+    }
+    if (isSeries && parseInt(episodeNo) <= 0) {
+      alert('Số tập phải lớn hơn 0.');
+      return;
+    }
+    setUploading(true);
+    setProgress(0);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const params = new URLSearchParams({ season_no: seasonNo });
+    if (isSeries && episodeNo) params.append('episode_no', episodeNo);
+    if (episodeTitle) params.append('episode_title', episodeTitle);
+
+    try {
+      await api.post(
+        `/admin/movies/${movie.movie_id}/video?${params.toString()}`,
+        formData,
+        {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (e) => {
+            if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
+          },
+          timeout: 0, // no timeout for large files
+        }
+      );
+      // Refresh list
+      const res = await api.get(`/videos/${movie.movie_id}/info`);
+      setExistingVids(res.data.episodes || []);
+      setFile(null);
+      setEpisodeNo('');
+      setEpisodeTitle('');
+      setProgress(0);
+      if (fileRef.current) fileRef.current.value = '';
+      onSuccess(`Upload video thành công${isSeries ? ` (Tập ${episodeNo})` : ''}!`);
+    } catch (err) {
+      alert(`Lỗi upload: ${err.message}`);
+    }
+    setUploading(false);
+  };
+
+  const handleDelete = async (ep) => {
+    if (!confirm(`Xóa video${ep.episode_no ? ` tập ${ep.episode_no}` : ''}?`)) return;
+    setDeleting(ep.id);
+    const params = new URLSearchParams({ season_no: ep.season_no ?? 1 });
+    if (ep.episode_no != null) params.append('episode_no', ep.episode_no);
+    try {
+      await api.delete(`/admin/movies/${movie.movie_id}/video?${params.toString()}`);
+      setExistingVids(prev => prev.filter(v => v.id !== ep.id));
+    } catch (err) {
+      alert(`Lỗi xóa: ${err.message}`);
+    }
+    setDeleting(null);
+  };
+
+  const startEdit = (ep) => {
+    setEditingEp(ep.id);
+    setEditForm({ episode_no: ep.episode_no || '', episode_title: ep.episode_title || '' });
+  };
+
+  const cancelEdit = () => {
+    setEditingEp(null);
+  };
+
+  const handleUpdate = async (ep) => {
+    try {
+      const payload = {};
+      if (editForm.episode_no !== '') {
+        const epNo = parseInt(editForm.episode_no);
+        if (epNo <= 0) {
+          alert('Số tập phải lớn hơn 0.');
+          return;
+        }
+        payload.episode_no = epNo;
+      }
+      payload.episode_title = editForm.episode_title;
+      
+      await api.put(`/admin/movies/${movie.movie_id}/video/${ep.id}`, payload);
+      setExistingVids(prev => {
+        const updated = prev.map(v => v.id === ep.id ? { ...v, episode_no: payload.episode_no, episode_title: payload.episode_title } : v);
+        return updated.sort((a, b) => (a.season_no - b.season_no) || ((a.episode_no || 0) - (b.episode_no || 0)));
+      });
+      setEditingEp(null);
+      onSuccess("Cập nhật thông tin tập thành công!");
+    } catch (err) {
+      alert(`Lỗi cập nhật: ${err.message}`);
+    }
+  };
+
+  const fileSizeMB = file ? (file.size / (1024 * 1024)).toFixed(1) : null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <motion.div
+        className="fixed inset-0 z-[200] bg-black/85 backdrop-blur-sm"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={() => !uploading && onClose()}
+      />
+
+      {/* Modal */}
+      <motion.div
+        className="fixed inset-0 z-[201] flex items-center justify-center p-4 pointer-events-none"
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.92, y: 20 }}
+        transition={{ type: 'spring', damping: 24, stiffness: 280 }}
+      >
+        <div
+          className="pointer-events-auto w-full max-w-lg bg-zinc-900 border border-white/10
+                     rounded-2xl shadow-2xl overflow-hidden"
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-6 pt-5 pb-4 border-b border-white/5 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-green-500/10 border border-green-500/20
+                              flex items-center justify-center">
+                <Video size={18} className="text-green-400" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Upload Video</h2>
+                <p className="text-xs text-gray-500 truncate max-w-[260px]">{fixTitle(movie.title)}</p>
+              </div>
+            </div>
+            <button onClick={onClose} disabled={uploading}
+              className="text-gray-500 hover:text-white transition p-1">
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="px-6 py-5 space-y-5">
+            {/* Existing videos */}
+            {existingVids.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Video hiện có</p>
+                <div className="space-y-2">
+                  {existingVids.map(ep => (
+                    <div key={ep.id}
+                      className="flex items-center justify-between bg-white/5 border border-white/8
+                                 rounded-xl px-3 py-2.5 transition-all">
+                      {editingEp === ep.id ? (
+                        <div className="flex-1 flex gap-2 items-center">
+                          {isSeries && (
+                            <input 
+                              type="number" min="1" 
+                              value={editForm.episode_no} 
+                              onChange={(e) => setEditForm({...editForm, episode_no: e.target.value})}
+                              className="w-16 bg-white/10 border border-white/20 rounded px-2 py-1 text-xs text-white outline-none focus:border-amber-500"
+                              placeholder="Tập"
+                            />
+                          )}
+                          <input 
+                            type="text" 
+                            value={editForm.episode_title} 
+                            onChange={(e) => setEditForm({...editForm, episode_title: e.target.value})}
+                            className="flex-1 bg-white/10 border border-white/20 rounded px-2 py-1 text-xs text-white outline-none focus:border-amber-500"
+                            placeholder="Tiêu đề tập"
+                          />
+                          <div className="flex gap-1 ml-2">
+                            <button onClick={() => handleUpdate(ep)} className="p-1.5 text-green-400 hover:bg-green-400/10 rounded transition">
+                               <CheckCircle size={14} />
+                            </button>
+                            <button onClick={cancelEdit} className="p-1.5 text-gray-400 hover:bg-white/10 rounded transition">
+                               <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2.5">
+                            <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
+                            <div>
+                              <p className="text-sm text-white font-medium">
+                                {ep.episode_no != null ? `Tập ${ep.episode_no}` : 'Phim lẻ'}
+                                {ep.episode_title && (
+                                  <span className="text-gray-400 font-normal ml-1.5">— {ep.episode_title}</span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-gray-600 flex items-center gap-1 mt-0.5">
+                                <HardDrive size={9} /> {ep.file_size_mb} MB · {ep.video_quality}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => startEdit(ep)}
+                              disabled={deleting === ep.id}
+                              className="text-amber-400/70 hover:text-amber-400 hover:bg-amber-400/10 rounded transition p-1.5"
+                              title="Sửa thông tin"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(ep)}
+                              disabled={deleting === ep.id}
+                              className="text-red-400/70 hover:text-red-400 hover:bg-red-400/10 rounded transition p-1.5"
+                              title="Xóa video này"
+                            >
+                              {deleting === ep.id
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <Trash2 size={14} />}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Phim bộ: episode fields */}
+            {isSeries && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Số tập *</label>
+                  <input
+                    type="number" min="1" max={movie.total_episodes}
+                    value={episodeNo}
+                    onChange={e => setEpisodeNo(e.target.value)}
+                    placeholder="VD: 1"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2
+                               text-sm text-white placeholder-gray-600 outline-none
+                               focus:border-green-500 focus:ring-1 focus:ring-green-500/20 transition"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Số mùa</label>
+                  <input
+                    type="number" min="1" value={seasonNo}
+                    onChange={e => setSeasonNo(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2
+                               text-sm text-white outline-none
+                               focus:border-green-500 focus:ring-1 focus:ring-green-500/20 transition"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-400 mb-1 block">Tên tập (tuỳ chọn)</label>
+                  <input
+                    type="text" value={episodeTitle}
+                    onChange={e => setEpisodeTitle(e.target.value)}
+                    placeholder="VD: Tập 1: Khởi đầu"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2
+                               text-sm text-white placeholder-gray-600 outline-none
+                               focus:border-green-500 focus:ring-1 focus:ring-green-500/20 transition"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* File picker */}
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">
+                File video (MP4, WebM, MKV, AVI, MOV — tối đa 2GB)
+              </label>
+              <div
+                onClick={() => !uploading && fileRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition
+                  ${file
+                    ? 'border-green-500/40 bg-green-500/5'
+                    : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/5'
+                  }`}
+              >
+                <input
+                  ref={fileRef} type="file"
+                  accept=".mp4,.webm,.mkv,.avi,.mov,video/*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  disabled={uploading}
+                />
+                {file ? (
+                  <div className="flex items-center justify-center gap-3">
+                    <Film size={20} className="text-green-400 flex-shrink-0" />
+                    <div className="text-left">
+                      <p className="text-sm text-white font-medium truncate max-w-[260px]">{file.name}</p>
+                      <p className="text-xs text-gray-500">{fileSizeMB} MB</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-gray-500">
+                    <Upload size={24} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">Nhấn để chọn file video</p>
+                    <p className="text-xs mt-1 text-gray-600">mp4 · webm · mkv · avi · mov</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            {uploading && (
+              <div>
+                <div className="flex justify-between text-xs text-gray-400 mb-1.5">
+                  <span>Đang upload...</span>
+                  <span>{progress}%</span>
+                </div>
+                <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progress}%` }}
+                    transition={{ ease: 'linear' }}
+                  />
+                </div>
+                <p className="text-xs text-gray-600 mt-1.5 text-center">
+                  File lớn có thể mất vài phút — vui lòng không đóng trình duyệt
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 pb-5 flex gap-3">
+            <button
+              onClick={onClose} disabled={uploading}
+              className="flex-1 py-2.5 rounded-xl text-sm font-medium text-gray-400
+                         bg-white/5 border border-white/10 hover:bg-white/10 transition disabled:opacity-40"
+            >
+              Hủy
+            </button>
+            <button
+              onClick={handleUpload}
+              disabled={!file || uploading}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white
+                         bg-gradient-to-r from-green-600 to-emerald-600
+                         hover:from-green-500 hover:to-emerald-500
+                         disabled:opacity-40 disabled:cursor-not-allowed
+                         flex items-center justify-center gap-2 transition-all shadow-lg"
+            >
+              {uploading
+                ? <><Loader2 size={15} className="animate-spin" /> Đang upload {progress}%</>
+                : <><Upload size={15} /> Upload Video</>
+              }
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </>
   );
 }

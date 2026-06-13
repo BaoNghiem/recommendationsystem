@@ -9,9 +9,11 @@ import UserManagement from './pages/admin/UserManagement';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import PeopleManagement from './pages/admin/PeopleManagement';
 import GenrePage from './pages/GenrePage';
+import CountryPage from './pages/CountryPage';
 import SearchPage from './pages/SearchPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import Profile from './pages/Profile';
+import WatchPage from './pages/WatchPage';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle, Sparkles, Search as SearchIcon, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
@@ -38,7 +40,9 @@ function AppInner() {
   const [aiExplanation, setAiExplanation]     = useState('');
   const [searchQuery, setSearchQuery]         = useState('');
   const [activeGenre, setActiveGenre]         = useState(null); // { key, label }
+  const [activeCountry, setActiveCountry]     = useState(null); // string
   const [resetToken, setResetToken]           = useState(null);
+  const [activeMovie, setActiveMovie]         = useState(null); // phim đang xem
 
   // ── Check URL params on mount for reset-password deep link ──
   useEffect(() => {
@@ -139,7 +143,7 @@ function AppInner() {
     }
     try {
       const res = await axios.post('/rate', {
-        user_id: user.user_id,
+        // BUG FIX: Khong gui user_id trong body - backend lay tu JWT token
         movie_id: movieId,
         rating: ratingValue,
       });
@@ -162,16 +166,39 @@ function AppInner() {
   const handleSearch = useCallback((query) => {
     setSearchQuery(query);
     setActiveGenre(null);
+    setActiveCountry(null);
     // If clearing search, go back home
     if (!query) {
       setCurrentPage('home');
     }
   }, []);
 
+  // ── Watch handler ─────────────────────────────────────────
+  const handleWatch = useCallback(async (movie) => {
+    try {
+      // Gọi API lấy full metadata để WatchPage nhận diện đúng phim bộ/phim lẻ
+      const res = await axios.get(`/movies/${movie.movie_id}`);
+      setActiveMovie(res.data);
+    } catch (err) {
+      console.warn("Could not fetch full movie details, using shallow data:", err);
+      setActiveMovie(movie);
+    }
+    setCurrentPage('watch');
+  }, []);
+
   // ── Genre select handler (tu Navbar dropdown) ──
   const handleGenreSelect = useCallback((genre) => {
     setActiveGenre(genre);
+    setActiveCountry(null);
     setCurrentPage('genre');
+    setSearchQuery('');
+    setSearchResults([]);
+  }, []);
+
+  const handleCountrySelect = useCallback((country) => {
+    setActiveCountry(country);
+    setActiveGenre(null);
+    setCurrentPage('country');
     setSearchQuery('');
     setSearchResults([]);
   }, []);
@@ -179,6 +206,11 @@ function AppInner() {
   const handleBackFromGenre = () => {
     setCurrentPage('home');
     setActiveGenre(null);
+  };
+
+  const handleBackFromCountry = () => {
+    setCurrentPage('home');
+    setActiveCountry(null);
   };
 
   const checkSystem = async () => {
@@ -203,12 +235,14 @@ function AppInner() {
             setCurrentPage(page);
             if (page === 'home') {
               setActiveGenre(null);
+              setActiveCountry(null);
               setSearchQuery('');
               setSearchResults([]);
             }
           }}
           onSearch={handleSearch}
           onGenreSelect={handleGenreSelect}
+          onCountrySelect={handleCountrySelect}
         />
       </div>
 
@@ -249,13 +283,26 @@ function AppInner() {
       ) : currentPage === 'people' ? (
         <PeopleManagement />
       ) : currentPage === 'profile' ? (
-        <Profile />
+        <Profile onWatch={handleWatch} />
+      ) : currentPage === 'watch' && activeMovie ? (
+        /* ── WATCH PAGE ── */
+        <WatchPage
+          movie={activeMovie}
+          onBack={() => {
+            setCurrentPage('home');
+            setActiveMovie(null);
+          }}
+          onRate={handleRateAction}
+          savedRatings={savedRatings}
+          onWatch={handleWatch}
+        />
       ) : currentPage === 'search' ? (
         /* ── SEARCH PAGE ── */
         <SearchPage
           query={searchQuery}
           onRate={handleRateAction}
           savedRatings={savedRatings}
+          onWatch={handleWatch}
           onBack={() => {
             setCurrentPage('home');
             setSearchQuery('');
@@ -267,14 +314,24 @@ function AppInner() {
           genre={activeGenre}
           onRate={handleRateAction}
           savedRatings={savedRatings}
+          onWatch={handleWatch}
           onBack={handleBackFromGenre}
+        />
+      ) : currentPage === 'country' && activeCountry ? (
+        /* ── COUNTRY PAGE ── */
+        <CountryPage
+          country={activeCountry}
+          onRate={handleRateAction}
+          savedRatings={savedRatings}
+          onWatch={handleWatch}
+          onBack={handleBackFromCountry}
         />
       ) : (
         /* ── HOME PAGE ── */
         <>
           {/* Hero Carousel — 10 phim mới nhất */}
           <div className="relative min-h-[60vh] lg:min-h-[80vh]">
-            <Hero movies={latestMovies} />
+            <Hero movies={latestMovies} onWatch={handleWatch} />
           </div>
 
           {/* ── MAIN CONTENT AREA ──────────────────────────── */}
@@ -297,6 +354,7 @@ function AppInner() {
                   isLoading={recLoading}
                   onRate={handleRateAction}
                   savedRatings={savedRatings}
+                  onWatch={handleWatch}
                   reason={isLoggedIn
                     ? (aiExplanation || 'AI Recommendation')
                     : ''}
@@ -311,6 +369,7 @@ function AppInner() {
               isLoading={loading}
               onRate={handleRateAction}
               savedRatings={savedRatings}
+              onWatch={handleWatch}
               reason="Top rated"
             />
           </main>

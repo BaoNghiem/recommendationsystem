@@ -293,7 +293,7 @@ class RecommendationEngine:
             conn.close()
 
             # 2. Merge voi dat file goc
-            loader = DataLoader(MOVIES_PATH, RATINGS_PATH, USERS_PATH)
+            loader = DataLoader(RATINGS_PATH, MOVIES_PATH, USERS_PATH)  # BUG FIX: dung thu tu dung (ratings, movies, users)
             movies = loader.load_movies()
             if new_movie_rows:
                 new_df = pd.DataFrame(new_movie_rows,

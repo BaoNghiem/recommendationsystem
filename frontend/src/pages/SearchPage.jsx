@@ -5,7 +5,7 @@ import axios from '../api/axios';
 import { fixTitle, getPosterUrl } from '../utils/formatTitle';
 import MovieDetailModal from '../components/MovieDetailModal';
 
-const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
+const SearchPage = ({ query, onRate, savedRatings = {}, onBack, onWatch }) => {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -291,7 +291,8 @@ const SearchPage = ({ query, onRate, savedRatings = {}, onBack }) => {
       {selectedMovie && (
         <MovieDetailModal 
           movie={selectedMovie} 
-          onClose={() => setSelectedMovie(null)} 
+          onClose={() => setSelectedMovie(null)}
+          onWatch={onWatch}
         />
       )}
     </div>

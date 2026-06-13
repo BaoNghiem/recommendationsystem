@@ -16,14 +16,28 @@ import PersonInfoModal from './PersonInfoModal';
  *                     directors: [], actors: [] }
  *   onClose: callback
  */
-export default function MovieDetailModal({ movie, onClose }) {
+export default function MovieDetailModal({ movie, onClose, onWatch }) {
   const [selectedPerson, setSelectedPerson] = useState(null);
+  const [hasVideo, setHasVideo]             = useState(false);
+  const [checkingVideo, setCheckingVideo]   = useState(true);
 
   useEffect(() => {
     const handler = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
+
+  // Check if video available
+  useEffect(() => {
+    if (!movie?.movie_id) return;
+    setCheckingVideo(true);
+    import('../api/axios').then(({ default: axiosInst }) => {
+      axiosInst.get(`/videos/${movie.movie_id}/info`)
+        .then(res => setHasVideo(res.data?.has_video === true))
+        .catch(() => setHasVideo(false))
+        .finally(() => setCheckingVideo(false));
+    });
+  }, [movie?.movie_id]);
 
   if (!movie) return null;
 
@@ -225,7 +239,37 @@ export default function MovieDetailModal({ movie, onClose }) {
           </div>
 
           {/* Footer */}
-          <div className="px-7 py-4 border-t border-white/5 flex justify-end flex-shrink-0">
+          <div className="px-7 py-4 border-t border-white/5 flex items-center justify-between flex-shrink-0">
+            {/* Watch button */}
+            <div>
+              {!checkingVideo && onWatch && (
+                <button
+                  id="movie-watch-btn"
+                  onClick={() => { onClose(); onWatch(movie); }}
+                  className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold
+                               transition-all ${
+                    hasVideo
+                      ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-white/5 border border-white/10 text-gray-500 cursor-not-allowed'
+                  }`}
+                  disabled={!hasVideo}
+                  title={hasVideo ? 'Xem phim ngay' : 'Chưa có video'}
+                >
+                  {hasVideo ? (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                      {movie.total_episodes ? 'Xem tập phim' : 'Xem phim'}
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                      Chưa có video
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
             <button
               onClick={onClose}
               className="px-5 py-2 rounded-lg text-sm font-medium text-gray-400

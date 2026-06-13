@@ -263,10 +263,13 @@ async def update_movie(
     - Bảng movies: title, genres_orig, release_year, country, total_episodes, description
     - Bảng movie_genres: 18 cột 0/1 (khi genres_str thay đổi)
     """
+    # BUG FIX: Dung `is not None` cho tat ca truong — tranh coi chuoi rong ('') la "khong co update"
+    # Vi du: body.country='' (xoa country) phai duoc coi la cap nhat hop le
     has_update = any([
-        body.title, body.genres_str, body.release_year is not None,
-        body.country, body.total_episodes is not None, body.description,
-        body.poster_url is not None,  # BUG #2 FIX: poster_url tham gia vào has_update check
+        body.title is not None, body.genres_str is not None,
+        body.release_year is not None, body.country is not None,
+        body.total_episodes is not None, body.description is not None,
+        body.poster_url is not None,
     ])
     if not has_update:
         raise HTTPException(400, "Cần ít nhất một trường để cập nhật.")
@@ -361,24 +364,54 @@ async def delete_movie(movie_id: int, admin: dict = Depends(require_admin)):
     Xóa phim.
     - movie_genres bị xóa tự động (ON DELETE CASCADE).
     - ratings bị xóa tự động (ON DELETE CASCADE).
+    - BUG FIX: Xóa file poster và video vật lý trên disk.
     """
     conn = DatabaseConnector.get_connection()
     if not conn:
         raise HTTPException(503, "Không thể kết nối Database.")
     cur = conn.cursor()
     try:
+        # Lấy thông tin file cần xóa trước khi xóa record
         cur.execute("SELECT COUNT(*) FROM ratings WHERE movie_id = %s", (movie_id,))
         ratings_count = cur.fetchone()[0]
 
+        # Lấy poster_url và danh sách video
+        cur.execute("SELECT poster_url FROM movies WHERE movie_id = %s", (movie_id,))
+        movie_row = cur.fetchone()
+        if not movie_row:
+            raise HTTPException(404, f"Movie {movie_id} không tồn tại.")
+        poster_url = movie_row[0]
+
+        cur.execute("SELECT video_url FROM movie_videos WHERE movie_id = %s", (movie_id,))
+        video_urls = [r[0] for r in cur.fetchall()]
+
+        # Xóa record (cascade xóa movie_genres, ratings, movie_videos)
         cur.execute(
             "DELETE FROM movies WHERE movie_id = %s RETURNING movie_id, title",
             (movie_id,),
         )
         row = cur.fetchone()
-        if not row:
-            raise HTTPException(404, f"Movie {movie_id} không tồn tại.")
-
         conn.commit()
+
+        # Xóa file vật lý sau khi commit thành công
+        BASE_DIR_DEL = Path(__file__).resolve().parent.parent.parent.parent
+        if poster_url and poster_url.startswith('/api/uploads/'):
+            poster_path = BASE_DIR_DEL / poster_url.lstrip('/api/')
+            if poster_path.exists():
+                try:
+                    poster_path.unlink()
+                except Exception:
+                    pass
+
+        for vurl in video_urls:
+            if vurl and vurl.startswith('/api/uploads/'):
+                vpath = BASE_DIR_DEL / vurl.lstrip('/api/')
+                if vpath.exists():
+                    try:
+                        vpath.unlink()
+                    except Exception:
+                        pass
+
         print(f"[ADMIN] Deleted movie {movie_id} ('{row[1]}'), {ratings_count} ratings cascade-deleted.")
         return {
             "message":         f"Đã xóa phim '{row[1]}' thành công.",
@@ -419,13 +452,14 @@ async def upload_poster(
         raise HTTPException(503, "Không thể kết nối Database.")
     cur = conn.cursor()
     try:
-        cur.execute("SELECT movie_id FROM movies WHERE movie_id = %s", (movie_id,))
-        if not cur.fetchone():
+        # Lấy poster cũ để xóa sau khi upload thành công
+        cur.execute("SELECT movie_id, poster_url FROM movies WHERE movie_id = %s", (movie_id,))
+        row = cur.fetchone()
+        if not row:
             raise HTTPException(404, "Phim không tồn tại.")
+        old_poster_url = row[1]
 
         filename = f"{movie_id}_{uuid.uuid4().hex}.{ext}"
-        # BUG FIX: Dung absolute path (tinh tu vi tri file hien tai) thay vi
-        # relative path "uploads/posters/" co the sai neu server start tu thu muc khac.
         BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
         filepath = BASE_DIR / "uploads" / "posters" / filename
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -435,6 +469,16 @@ async def upload_poster(
         poster_url = f"/api/uploads/posters/{filename}"
         cur.execute("UPDATE movies SET poster_url = %s WHERE movie_id = %s", (poster_url, movie_id))
         conn.commit()
+
+        # BUG FIX: Xóa poster cũ trên disk sau khi commit thành công
+        if old_poster_url and old_poster_url.startswith('/api/uploads/posters/'):
+            old_path = BASE_DIR / old_poster_url.lstrip('/api/')
+            if old_path.exists():
+                try:
+                    old_path.unlink()
+                except Exception:
+                    pass
+
         print(f"[ADMIN] Poster uploaded for movie {movie_id}: {poster_url}")
         return {"msg": "Upload thành công", "poster_url": poster_url}
     except HTTPException:

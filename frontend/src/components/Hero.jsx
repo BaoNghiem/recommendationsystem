@@ -20,7 +20,7 @@ const GRADIENTS = [
 
 const AUTO_SLIDE_INTERVAL = 10000;
 
-const Hero = ({ movies = [] }) => {
+const Hero = ({ movies = [], onWatch }) => {
   const [currentIndex, setCurrentIndex]   = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [detailMovie, setDetailMovie]     = useState(null);
@@ -53,8 +53,12 @@ const Hero = ({ movies = [] }) => {
   };
 
   const goNext = () => {
+    // BUG FIX: Them isTransitioning guard giong goPrev() de tranh animation chong
+    if (isTransitioning) return;
+    setIsTransitioning(true);
     setCurrentIndex(prev => (prev + 1) % (total || 1));
     resetTimer();
+    setTimeout(() => setIsTransitioning(false), 600);
   };
 
   const goPrev = () => {
@@ -186,8 +190,20 @@ const Hero = ({ movies = [] }) => {
             </div>
           )}
 
-          {/* Nút Chi tiết (duy nhất — bỏ Phát ngay) */}
+          {/* Nút Phát ngay và Chi tiết */}
           <div className="flex gap-4 mt-8">
+            <button
+              onClick={() => onWatch?.(movie)}
+              className="flex items-center px-8 py-3 bg-white/10 text-white font-bold text-base
+                         rounded-lg backdrop-blur-md border border-white/10 shadow-xl
+                         hover:bg-amber-500 hover:text-black hover:border-amber-500 hover:shadow-amber-500/20
+                         transition-all duration-300 transform active:scale-95 group"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="mr-2">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Phát ngay
+            </button>
             <button
               onClick={() => openDetail(movie)}
               className="flex items-center px-8 py-3 bg-white/10 text-white font-bold text-base
