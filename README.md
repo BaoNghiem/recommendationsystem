@@ -1,18 +1,17 @@
 # 🎬 Hệ thống Gợi ý Phim (Movie Recommendation System)
 
-Đồ án tốt nghiệp — Hệ thống gợi ý phim sử dụng Hybrid AI (FunkSVD + Content-Based Filtering).
+Đồ án tốt nghiệp — Hệ thống gợi ý phim sử dụng **Hybrid AI** (FunkSVD + Content-Based Filtering), backend FastAPI, frontend React.
 
 ---
 
 ## 📋 Yêu cầu hệ thống
 
-| Thành phần | Phiên bản tối thiểu |
+| Thành phần | Phiên bản |
 |---|---|
 | Python | 3.10+ |
 | Node.js | 18+ |
 | PostgreSQL | 14+ |
 | RAM | 4 GB (8 GB khuyến nghị) |
-| Dung lượng disk | 10 GB+ (để lưu video upload) |
 
 ---
 
@@ -20,181 +19,148 @@
 
 ```
 Bài đồ án/
-├── frontend/               # React + Vite
-│   ├── src/
-│   └── package.json
+├── start.py                # ⭐ Script khởi động all-in-one
+├── main_train.py           # Train lại AI model (nếu cần)
+├── requirements.txt        # Thư viện Python
+├── .env.example            # Mẫu cấu hình môi trường
+│
 ├── src/
 │   ├── api/                # FastAPI backend
-│   │   ├── main.py         # Entry point
+│   │   ├── main.py         # Entry point server
 │   │   ├── routes/         # Tất cả API endpoints
-│   │   ├── engine_wrapper.py   # Wrapper cho AI Engine
+│   │   ├── engine_wrapper.py   # Wrapper AI Engine (load/retrain)
 │   │   └── auth/           # JWT authentication
-│   ├── models/             # AI model (Hybrid Recommender)
-│   ├── data/               # DataLoader
+│   ├── models/             # AI models (FunkSVD, Content-Based, Hybrid)
+│   ├── data/               # DataLoader & Preprocessor
+│   ├── features/           # Feature engineering
+│   ├── evaluation/         # Đánh giá mô hình (RMSE, MAE, NDCG)
 │   └── database/
 │       ├── db_config.py    # Kết nối PostgreSQL
-│       └── schema.sql      # Schema database đầy đủ (11 bảng)
-├── uploads/                # File upload (poster + video) — KHÔNG commit lên git
-│   ├── posters/
-│   └── videos/
-├── data/                   # Dataset MovieLens 1M
-├── output/                 # Model đã train (.pkl files)
-├── venv/                   # Python virtual environment — KHÔNG commit lên git
-├── .env                    # Biến môi trường — KHÔNG commit lên git
-├── .env.example            # Mẫu .env
-└── requirements.txt
+│       └── schema.sql      # Schema database (11 bảng)
+│
+├── frontend/               # React + Vite + TailwindCSS
+│
+├── scripts/
+│   ├── movie_db_dump.sql   # ⭐ Dump DB (~28 MB) — KHÔNG có trong repo, xem Bước 3
+│   ├── restore_db.py       # ⭐ Restore database từ dump
+│   ├── dump_db.py          # Tạo dump mới (dùng khi backup)
+│   └── setup_and_run.py    # Khởi động backend đơn lẻ (không có frontend)
+│
+├── data/ml-1m/             # Dataset MovieLens 1M (nguồn train AI)
+├── output/models/          # Model đã train (.pkl) — cần có khi chạy
+└── uploads/                # Poster + video upload — KHÔNG commit lên git
 ```
+
+> **⚠️ Lưu ý về dữ liệu:** File `scripts/movie_db_dump.sql` (~28 MB) **không được lưu trong repo** do vượt giới hạn GitHub.  
+> Bạn phải có file này riêng (liên hệ tác giả hoặc tự xuất từ máy gốc bằng `python scripts/dump_db.py`).
 
 ---
 
-## ⚙️ Hướng dẫn cài đặt từ đầu (máy mới)
+## ⚙️ Hướng dẫn cài đặt (máy mới)
 
-### Bước 1 — Clone repository
-
-```bash
-git clone <repository-url>
-cd "Bài đồ án"
-```
-
-### Bước 2 — Tạo và kích hoạt môi trường ảo Python
+### Bước 1 — Cài đặt thư viện Python
 
 ```bash
-# Tạo venv
+# Tạo môi trường ảo (khuyến nghị)
 python -m venv venv
 
 # Kích hoạt (Windows PowerShell)
 .\venv\Scripts\Activate.ps1
 
-# Kích hoạt (Windows CMD)
-venv\Scripts\activate.bat
-
-# Kích hoạt (macOS/Linux)
-source venv/bin/activate
-```
-
-### Bước 3 — Cài đặt dependencies Python
-
-```bash
+# Cài thư viện
 pip install -r requirements.txt
 ```
 
-### Bước 4 — Cấu hình biến môi trường
+### Bước 2 — Cấu hình môi trường
 
 ```bash
-# Sao chép file mẫu
-copy .env.example .env      # Windows
-cp .env.example .env        # macOS/Linux
+# Windows
+copy .env.example .env
+
+# macOS/Linux
+cp .env.example .env
 ```
 
-Sau đó mở `.env` và điền thông tin:
+Mở `.env` và điền các thông tin sau:
 
 ```env
-# JWT — Tạo key ngẫu nhiên mạnh
-JWT_SECRET_KEY=your-super-secret-key-change-this
+JWT_SECRET_KEY=any-random-secret-string-here
 
-# PostgreSQL
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=movie_db
 DB_USER=postgres
 DB_PASSWORD=your_postgres_password
 
-# Email (để gửi email xác nhận — có thể bỏ qua khi dev)
 MAIL_USERNAME=your_gmail@gmail.com
 MAIL_PASSWORD=your_16char_app_password
 ```
 
-### Bước 5 — Tạo database PostgreSQL
+> **Lưu ý:** `MAIL_USERNAME` / `MAIL_PASSWORD` dùng để gửi email xác nhận tài khoản.  
+> Nếu chỉ chạy demo, có thể để placeholder — tính năng đăng ký sẽ vẫn hoạt động (email sẽ không được gửi đi).
+
+### Bước 3 — Tạo database và restore dữ liệu
+
+**3a. Tạo database trống trong PostgreSQL:**
 
 ```sql
--- Mở psql hoặc pgAdmin rồi chạy:
+-- Trong psql hoặc pgAdmin:
 CREATE DATABASE movie_db;
 ```
 
-Sau đó import schema:
+**3b. Lấy file dump SQL:**
+
+File `scripts/movie_db_dump.sql` (~28 MB) **không được lưu trong repo** do vượt giới hạn GitHub.  
+Bạn cần lấy file này theo một trong hai cách:
+
+- **Cách 1 (khuyến nghị):** Tải file `movie_db_dump.sql` từ liên kết mà tác giả cung cấp (Google Drive / email), rồi đặt vào thư mục `scripts/`.
+- **Cách 2 (nếu có máy gốc):** Chạy lệnh sau trên máy gốc để xuất dump:
+  ```bash
+  python scripts/dump_db.py
+  ```
+
+**3c. Restore dữ liệu:**
 
 ```bash
-psql -U postgres -d movie_db -f src/database/schema.sql
+python scripts/restore_db.py
 ```
 
-> **Lưu ý:** Nếu có file `migration_phase3.sql`, chạy thêm:
-> ```bash
-> psql -U postgres -d movie_db -f src/database/migration_phase3.sql
-> ```
+> Script này đọc thông tin kết nối từ `.env` và tự động restore file `scripts/movie_db_dump.sql` (chứa toàn bộ phim, ratings, diễn viên, đạo diễn).
 
-### Bước 6 — Restore dữ liệu (nếu chuyển máy)
+### Bước 4 — (Tùy chọn) Tạo tài khoản Admin
 
-Nếu có file dump database từ máy cũ:
-
-```bash
-pg_restore -U postgres -d movie_db backup.dump
-# hoặc nếu là file .sql:
-psql -U postgres -d movie_db < backup.sql
-```
-
-### Bước 7 — Copy file model đã train
-
-Thư mục `output/` chứa các file `.pkl` model đã train (FunkSVD, Content-Based matrix). Nếu chuyển máy, copy nguyên thư mục `output/` sang.
-
-Nếu không có file model, chạy lại training:
-
-```bash
-python main_train.py
-```
-
-> ⚠️ Training mất khoảng 10-30 phút tùy máy.
-
-### Bước 8 — Copy file uploads (poster + video)
-
-Copy thư mục `uploads/` từ máy cũ sang (thư mục này không được commit lên git vì quá nặng).
-
-```bash
-# Cấu trúc:
-uploads/
-├── posters/    # Ảnh poster phim
-└── videos/     # File video phim (có thể lên đến 2.5 GB/file)
-```
-
----
-
-## 🚀 Chạy ứng dụng
-
-### Backend (FastAPI)
-
-```bash
-# Kích hoạt venv trước
-.\venv\Scripts\Activate.ps1
-
-# Chạy backend
-.\venv\Scripts\python.exe -m uvicorn src.api.main:app --reload --port 8000
-```
-
-Backend khởi động tại: `http://127.0.0.1:8000`  
-API docs (Swagger): `http://127.0.0.1:8000/docs`
-
-### Frontend (React + Vite)
-
-```bash
-cd frontend
-
-# Lần đầu — cài dependencies
-npm install
-
-# Chạy dev server
-npm run dev
-```
-
-Frontend khởi động tại: `http://localhost:5173`
-
----
-
-## 🔑 Tài khoản mặc định
-
-Sau khi import dữ liệu, có thể tạo admin bằng cách đăng ký tài khoản rồi update role trực tiếp trong DB:
+Đăng ký tài khoản thường qua giao diện web, sau đó nâng quyền admin trong database:
 
 ```sql
 UPDATE users SET role = 'admin' WHERE email = 'your_email@example.com';
 ```
+
+---
+
+## 🚀 Khởi động hệ thống
+
+```bash
+python start.py
+```
+
+Script này sẽ tự động:
+1. Kiểm tra file `.env`
+2. Kiểm tra AI model trong `output/models/` (tự train nếu chưa có — ~10-30 phút)
+3. Cài `npm install` nếu `node_modules` chưa có
+4. Khởi động **Backend** tại `http://127.0.0.1:8000`
+5. Khởi động **Frontend** tại `http://localhost:5173`
+
+Nhấn `Ctrl+C` để tắt cả hai server.
+
+---
+
+## 🔗 URL truy cập
+
+| URL | Mô tả |
+|---|---|
+| `http://localhost:5173` | Giao diện web người dùng |
+| `http://127.0.0.1:8000` | API backend |
+| `http://127.0.0.1:8000/docs` | Swagger UI (test API) |
 
 ---
 
@@ -206,7 +172,7 @@ UPDATE users SET role = 'admin' WHERE email = 'your_email@example.com';
 | `POST /auth/login` | Đăng nhập, nhận JWT |
 | `GET /movies/` | Danh sách phim |
 | `GET /movies/search?q=...` | Tìm kiếm phim, đạo diễn, diễn viên |
-| `GET /recommend/{user_id}` | Gợi ý phim AI cho user |
+| `GET /recommend/{user_id}` | Gợi ý phim AI (Hybrid) |
 | `GET /popular` | Phim phổ biến nhất |
 | `GET /trending` | Phim đang hot |
 | `PUT /watch/progress` | Lưu tiến độ xem (cần login) |
@@ -215,56 +181,25 @@ UPDATE users SET role = 'admin' WHERE email = 'your_email@example.com';
 
 ---
 
-## 🎥 Upload Video
-
-- Hỗ trợ định dạng: `mp4`, `webm`, `mkv`, `avi`, `mov`
-- Kích thước tối đa: **2.5 GB**
-- Upload sử dụng **streaming chunk** (8 MB/chunk), không load toàn bộ file vào RAM
-- Cần đăng nhập bằng tài khoản **admin**
-
----
-
 ## 🛠️ Xử lý lỗi thường gặp
 
-### Lỗi kết nối database
-```
-Cannot connect to Database
-```
-→ Kiểm tra PostgreSQL đang chạy và thông tin trong `.env` đúng.
-
-### Lỗi import model
-```
-AI Engine không tải được model
-```
-→ Đảm bảo thư mục `output/` có đầy đủ file `.pkl`. Chạy lại `python main_train.py` nếu cần.
-
-### Frontend báo lỗi CORS
-→ Đảm bảo backend đang chạy ở port 8000. Kiểm tra `VITE_API_URL` trong `frontend/.env` (nếu có).
-
-### Upload video lỗi 413
-→ Đảm bảo backend đang chạy với `--reload` flag đúng cách. File không được vượt 2.5 GB.
-
----
-
-## 📦 Chuyển máy — Checklist
-
-- [ ] Clone git repository
-- [ ] Tạo venv và cài `pip install -r requirements.txt`
-- [ ] Copy file `.env` (hoặc tạo mới từ `.env.example`)
-- [ ] Tạo database PostgreSQL, import `schema.sql`
-- [ ] Restore dữ liệu từ backup DB
-- [ ] Copy thư mục `output/` (AI model)
-- [ ] Copy thư mục `uploads/` (poster + video)
-- [ ] `cd frontend && npm install`
-- [ ] Chạy backend: `.\venv\Scripts\python.exe -m uvicorn src.api.main:app --reload --port 8000`
-- [ ] Chạy frontend: `npm run dev`
+| Lỗi | Giải pháp |
+|---|---|
+| `Cannot connect to Database` | Kiểm tra PostgreSQL đang chạy và thông tin `.env` đúng |
+| `AI Engine không tải được model` | Đảm bảo `output/models/` có file `.pkl`. Chạy `python main_train.py` nếu cần |
+| Frontend báo lỗi CORS | Đảm bảo backend đang chạy ở port 8000 |
+| Lỗi 413 khi upload video | File không được vượt quá 2.5 GB |
+| `npm: command not found` | Cài Node.js 18+ từ https://nodejs.org |
 
 ---
 
 ## 🧠 Công nghệ sử dụng
 
-**Backend:** FastAPI, PostgreSQL, Python 3.10+  
-**AI Engine:** FunkSVD (Collaborative Filtering), Cosine Similarity (Content-Based), Hybrid Recommender  
-**Frontend:** React 18, Vite, Framer Motion, Lucide Icons, TailwindCSS  
-**Auth:** JWT (HS256), bcrypt password hashing  
-**Video Streaming:** HTTP Range Requests (206 Partial Content)
+| Tầng | Công nghệ |
+|---|---|
+| **Backend** | FastAPI, Uvicorn, Python 3.10+ |
+| **Database** | PostgreSQL 14+ |
+| **AI Engine** | FunkSVD (Collaborative Filtering), Cosine Similarity (Content-Based), Hybrid Recommender |
+| **Frontend** | React 18, Vite, TailwindCSS, Framer Motion, Lucide Icons |
+| **Auth** | JWT (HS256), bcrypt |
+| **Video** | HTTP Range Requests (streaming 206 Partial Content) |

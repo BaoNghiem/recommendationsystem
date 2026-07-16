@@ -14,8 +14,16 @@ export function AuthProvider({ children }) {
     const savedUser  = localStorage.getItem('user');
     if (savedToken && savedUser) {
       try {
-        setToken(savedToken);
-        setUser(JSON.parse(savedUser));
+        // Kiểm tra token còn hạn không (decode payload)
+        const payload = JSON.parse(atob(savedToken.split('.')[1]));
+        const isExpired = payload.exp && payload.exp * 1000 < Date.now();
+        if (isExpired) {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('user');
+        } else {
+          setToken(savedToken);
+          setUser(JSON.parse(savedUser));
+        }
       } catch {
         localStorage.removeItem('access_token');
         localStorage.removeItem('user');
@@ -23,6 +31,7 @@ export function AuthProvider({ children }) {
     }
     setLoading(false);
   }, []);
+
 
   // ── Lắng nghe sự kiện token hết hạn từ axios interceptor ──
   useEffect(() => {

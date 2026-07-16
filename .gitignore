@@ -41,7 +41,7 @@ tests/phase*_results.json
 *.sqlite3
 *.db
 logs/
-# DB dump có thể rất lớn — KHÔNG push lên GitHub.
+# DB dump quá lớn (>25 MB) — KHÔNG push lên GitHub.
 # Dùng script: python scripts/dump_db.py để tạo local.
 scripts/movie_db_dump.sql
 
@@ -50,4 +50,7 @@ scripts/movie_db_dump.sql
 # ══════════════════════════════════════════════
 # output/models/*.pkl  -> GIỮ (3.7MB + 0.4MB — OK)
 # data/ml-1m/          -> GIỮ (ratings.dat 23.5MB — OK với git)
-# uploads/posters/     -> GIỮ (poster ảnh đã upload)
+# uploads/posters/     -> KHÔNG GIỮ (ảnh upload của người dùng, không track)
+# uploads/videos/      -> KHÔNG GIỮ (file video có thể rất lớn)
+uploads/videos/
+uploads/posters/
